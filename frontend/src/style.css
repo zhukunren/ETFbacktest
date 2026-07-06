@@ -1,0 +1,54 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --page-bg: #F4F6F8;
+  --surface: #FFFFFF;
+  --surface-soft: #F8FAFC;
+  --border: #E2E8F0;
+  --text: #111827;
+  --muted: #64748B;
+  --accent: #2563EB;
+  --success: #16A34A;
+  --danger: #DC2626;
+  --profit: #DC2626;
+  --loss: #16A34A;
+  --warning: #D97706;
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  --el-color-primary: #2563EB;
+  --el-color-success: #16A34A;
+  --el-color-warning: #D97706;
+  --el-color-danger: #DC2626;
+  --el-border-radius-base: 8px;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background: var(--page-bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#app {
+  width: 100%;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.el-button {
+  font-weight: 650;
+}
+
+.el-table {
+  --el-table-header-bg-color: #F8FAFC;
+  --el-table-header-text-color: #334155;
+}
