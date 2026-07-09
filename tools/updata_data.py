@@ -1,31 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-Update ETF market data from TuShare into SQLite.
+Update ETF market data from AkShare into SQLite.
 
 This script intentionally only handles ETF daily quotes:
-- ETF universe: pro.etf_basic(list_status='L')
-- Daily prices: ts.pro_bar(asset='FD', freq='D')
+- ETF universe: ak.fund_etf_spot_em()
+- Daily prices: ak.fund_etf_hist_em()
 - Storage: SQLite tables etf_basic and etf_daily_price
 """
 
 import argparse
-import getpass
-import io
 import os
 import re
 import sqlite3
-import sys
 import time
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import akshare as ak
 import pandas as pd
-import tushare as ts
 
-warnings.filterwarnings("ignore", category=FutureWarning, module="tushare")
+warnings.filterwarnings("ignore", category=FutureWarning, module="akshare")
 
 try:
     from tqdm import tqdm
@@ -52,16 +48,16 @@ except Exception:
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = REPO_ROOT / "data" / "market_data.sqlite3"
+DEFAULT_BENCHMARK_CODES = ["000001.SH", "000300.SH"]
+DEFAULT_INDEX_NAMES = {
+    "000001.SH": "上证指数",
+    "000016.SH": "上证50",
+    "000300.SH": "沪深300",
+    "000852.SH": "中证1000",
+    "000905.SH": "中证500",
+    "399006.SZ": "创业板指",
+}
 
-TOKEN_ENV_NAMES = (
-    "TUSHARE_TOKEN",
-    "TUSHARETOKEN",
-    "TS_TOKEN",
-    "tushare_token",
-    "tusharetoken",
-)
-
-ETF_BASIC_FIELDS = "ts_code,extname,index_code,index_name,exchange,mgr_name"
 PRICE_COLUMNS = [
     "ts_code",
     "stock_code",
@@ -88,71 +84,6 @@ def log(message: str):
         print(text)
 
 
-def parse_tokens(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [part.strip() for part in re.split(r"[,;\s]+", str(raw)) if part.strip()]
-
-
-def get_windows_registry_env(name: str) -> str | None:
-    if sys.platform != "win32":
-        return None
-    try:
-        import winreg
-    except Exception:
-        return None
-
-    locations = [
-        (winreg.HKEY_CURRENT_USER, "Environment"),
-        (winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment"),
-    ]
-    for root, path in locations:
-        try:
-            with winreg.OpenKey(root, path) as key:
-                value, _ = winreg.QueryValueEx(key, name)
-                if value:
-                    return str(value)
-        except OSError:
-            continue
-    return None
-
-
-def get_env_value(name: str) -> str | None:
-    return os.getenv(name) or get_windows_registry_env(name)
-
-
-def is_placeholder_secret(value: str | None) -> bool:
-    token = str(value or "").strip()
-    if not token:
-        return True
-    lowered = token.lower()
-    return lowered.startswith("your_") or token.startswith("你的") or lowered in {
-        "your_tushare_token",
-        "你的tushare token",
-    }
-
-
-def resolve_tushare_token(args: argparse.Namespace) -> str:
-    values: list[str] = []
-    if args.tushare_tokens:
-        for item in args.tushare_tokens:
-            values.extend(parse_tokens(item))
-    elif args.tushare_token_env:
-        values.extend(parse_tokens(get_env_value(args.tushare_token_env)))
-    elif args.tushare_token_prompt:
-        values.append(getpass.getpass("TuShare token: "))
-    else:
-        for env_name in TOKEN_ENV_NAMES:
-            values.extend(parse_tokens(get_env_value(env_name)))
-
-    for token in values:
-        if not is_placeholder_secret(token):
-            return token.strip()
-
-    env_hint = ", ".join(TOKEN_ENV_NAMES)
-    raise RuntimeError(f"缺少 TuShare token。请设置环境变量 {env_hint}，或使用 --tushare-token 传入。")
-
-
 def normalize_code(value: str) -> str:
     code = str(value or "").strip().upper()
     if not code:
@@ -161,11 +92,24 @@ def normalize_code(value: str) -> str:
         base, exchange = code.split(".", 1)
         return f"{base}.{exchange}"
     if len(code) == 6 and code.isdigit():
-        if code.startswith(("50", "51", "52", "56", "58")):
+        if code.startswith(("50", "51", "52", "53", "56", "58", "000")):
             return f"{code}.SH"
-        if code.startswith(("15", "16", "18")):
+        if code.startswith(("15", "16", "18", "399")):
             return f"{code}.SZ"
     return code
+
+
+def code_without_exchange(value: str) -> str:
+    return normalize_code(value).split(".")[0]
+
+
+def exchange_from_code(value: str) -> str | None:
+    code = normalize_code(value)
+    if code.endswith(".SH"):
+        return "上海证券交易所"
+    if code.endswith(".SZ"):
+        return "深圳证券交易所"
+    return None
 
 
 def parse_yyyymmdd(value: str) -> str:
@@ -232,34 +176,38 @@ def ensure_schema(conn: sqlite3.Connection):
 
 
 def call_with_retry(fn, label: str, retries: int, delay: float):
+    attempts = max(1, int(retries))
     last_error: Exception | None = None
-    for attempt in range(1, retries + 1):
+    for attempt in range(1, attempts + 1):
         try:
             return fn()
         except Exception as exc:
             last_error = exc
-            if attempt >= retries:
+            if attempt >= attempts:
                 break
             wait = delay * attempt
             log(f"[{label}] 第 {attempt} 次失败：{exc}，{wait:.1f}s 后重试")
             time.sleep(wait)
-    raise RuntimeError(f"{label} 重试 {retries} 次仍失败") from last_error
+    raise RuntimeError(f"{label} 尝试 {attempts} 次仍失败") from last_error
 
 
-def fetch_etf_basic(pro, retries: int, retry_delay: float) -> pd.DataFrame:
+def fetch_etf_basic(retries: int, retry_delay: float) -> pd.DataFrame:
     def _call():
-        return pro.etf_basic(list_status="L", fields=ETF_BASIC_FIELDS)
+        return ak.fund_etf_spot_em()
 
-    df = call_with_retry(_call, "etf_basic", retries, retry_delay)
+    df = call_with_retry(_call, "fund_etf_spot_em", retries, retry_delay)
     if df is None or df.empty:
         return pd.DataFrame(columns=["ts_code", "stock_name", "index_code", "index_name", "exchange", "mgr_name"])
+    if "代码" not in df.columns:
+        raise RuntimeError(f"AkShare ETF列表缺少代码字段，实际字段: {list(df.columns)}")
 
     df = df.copy()
-    df["ts_code"] = df["ts_code"].map(normalize_code)
-    df["stock_name"] = df.get("extname", "")
-    for col in ("index_code", "index_name", "exchange", "mgr_name"):
-        if col not in df.columns:
-            df[col] = None
+    df["ts_code"] = df["代码"].map(normalize_code)
+    df["stock_name"] = df["名称"] if "名称" in df.columns else ""
+    df["index_code"] = None
+    df["index_name"] = None
+    df["exchange"] = df["ts_code"].map(exchange_from_code)
+    df["mgr_name"] = None
     return df[["ts_code", "stock_name", "index_code", "index_name", "exchange", "mgr_name"]].dropna(subset=["ts_code"])
 
 
@@ -278,7 +226,7 @@ def upsert_etf_basic(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
             item.get("exchange"),
             item.get("mgr_name"),
             "L",
-            "tushare",
+            "akshare",
             now,
         ))
 
@@ -327,28 +275,45 @@ def effective_start_date(conn: sqlite3.Connection, ts_code: str, requested_start
     return max(requested_dt, next_dt).strftime("%Y%m%d")
 
 
-def pro_bar(pro, ts_code: str, start_date: str, end_date: str, adj: str, retries: int, retry_delay: float) -> pd.DataFrame:
-    kwargs = {
-        "api": pro,
-        "ts_code": ts_code,
-        "start_date": start_date,
-        "end_date": end_date,
-        "asset": "FD",
-        "freq": "D",
-    }
-    if adj:
-        kwargs["adj"] = adj
+def fetch_akshare_hist(ts_code: str, start_date: str, end_date: str, adj: str, retries: int, retry_delay: float) -> pd.DataFrame:
+    if not adj:
+        def _sina_call():
+            return ak.fund_etf_hist_sina(symbol=akshare_fund_symbol(ts_code))
 
-    def _call():
-        with redirect_stdout(io.StringIO()):
-            return ts.pro_bar(**kwargs)
+        try:
+            df = call_with_retry(_sina_call, f"{ts_code} fund_etf_hist_sina", retries, retry_delay)
+            if df is not None and not df.empty:
+                normalized = normalize_daily_df(df, ts_code, None)
+                if not normalized.empty:
+                    start = pd.to_datetime(start_date, format="%Y%m%d", errors="coerce").strftime("%Y-%m-%d")
+                    end = pd.to_datetime(end_date, format="%Y%m%d", errors="coerce").strftime("%Y-%m-%d")
+                    return normalized[
+                        (normalized["trade_date"] >= start)
+                        & (normalized["trade_date"] <= end)
+                    ]
+        except Exception:
+            log(f"[{ts_code}] fund_etf_hist_sina 不可用，切换 fund_etf_hist_em")
 
-    df = call_with_retry(_call, f"{ts_code} pro_bar", retries, retry_delay)
-    return pd.DataFrame() if df is None else df
+    def _eastmoney_call():
+        return ak.fund_etf_hist_em(
+            symbol=code_without_exchange(ts_code),
+            period="daily",
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adj,
+        )
+
+    try:
+        df = call_with_retry(_eastmoney_call, f"{ts_code} fund_etf_hist_em", retries, retry_delay)
+        if df is not None and not df.empty:
+            return df
+    except Exception:
+        if adj:
+            raise
+        return pd.DataFrame()
 
 
 def fetch_etf_daily(
-    pro,
     ts_code: str,
     name: str | None,
     start_date: str,
@@ -360,38 +325,39 @@ def fetch_etf_daily(
     if start_date > end_date:
         return pd.DataFrame()
 
-    df = pro_bar(pro, ts_code, start_date, end_date, adj, retries, retry_delay)
+    df = fetch_akshare_hist(ts_code, start_date, end_date, adj, retries, retry_delay)
     if df.empty:
         return df
-
-    # TuShare may silently cap very long ranges. Split by year when the result touches the configured cap.
-    max_rows = int(os.getenv("TS_MAX_ROWS", "5800"))
-    if len(df) >= max_rows:
-        frames = []
-        start_dt = datetime.strptime(start_date, "%Y%m%d")
-        end_dt = datetime.strptime(end_date, "%Y%m%d")
-        year = start_dt.year
-        while year <= end_dt.year:
-            seg_start = max(start_dt, datetime(year, 1, 1)).strftime("%Y%m%d")
-            seg_end = min(end_dt, datetime(year, 12, 31)).strftime("%Y%m%d")
-            frames.append(pro_bar(pro, ts_code, seg_start, seg_end, adj, retries, retry_delay))
-            year += 1
-        df = pd.concat([frame for frame in frames if frame is not None and not frame.empty], ignore_index=True)
 
     return normalize_daily_df(df, ts_code, name)
 
 
 def normalize_daily_df(df: pd.DataFrame, ts_code: str, name: str | None) -> pd.DataFrame:
-    if df is None or df.empty or "trade_date" not in df.columns:
+    if df is None or df.empty:
         return pd.DataFrame(columns=PRICE_COLUMNS)
 
     out = df.copy()
+    out = out.rename(columns={
+        "date": "trade_date",
+        "日期": "trade_date",
+        "开盘": "open",
+        "收盘": "close",
+        "最高": "high",
+        "最低": "low",
+        "成交量": "volume",
+        "成交额": "amount",
+        "涨跌额": "change",
+        "涨跌幅": "pct_chg",
+    })
+
+    if "trade_date" not in out.columns:
+        return pd.DataFrame(columns=PRICE_COLUMNS)
     if "vol" in out.columns and "volume" not in out.columns:
         out = out.rename(columns={"vol": "volume"})
     out["ts_code"] = normalize_code(ts_code)
     out["stock_code"] = out["ts_code"]
     out["name"] = name
-    out["trade_date"] = pd.to_datetime(out["trade_date"], format="%Y%m%d", errors="coerce").dt.strftime("%Y-%m-%d")
+    out["trade_date"] = pd.to_datetime(out["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
     out = out.dropna(subset=["trade_date"])
 
     for col in ("open", "high", "low", "close", "pre_close", "change", "pct_chg", "volume", "amount"):
@@ -402,6 +368,48 @@ def normalize_daily_df(df: pd.DataFrame, ts_code: str, name: str | None) -> pd.D
     out["updated_at"] = datetime.now().isoformat(timespec="seconds")
     out = out[PRICE_COLUMNS].sort_values("trade_date").drop_duplicates(subset=["ts_code", "trade_date"], keep="last")
     return out
+
+
+def akshare_index_symbol(value: str) -> str:
+    code = normalize_code(value)
+    base = code_without_exchange(code)
+    if code.endswith(".SZ"):
+        return f"sz{base}"
+    return f"sh{base}"
+
+
+def akshare_fund_symbol(value: str) -> str:
+    return akshare_index_symbol(value)
+
+
+def fetch_index_daily(
+    index_code: str,
+    name: str | None,
+    start_date: str,
+    end_date: str,
+    retries: int,
+    retry_delay: float,
+) -> pd.DataFrame:
+    if start_date > end_date:
+        return pd.DataFrame()
+
+    def _call():
+        return ak.stock_zh_index_daily(symbol=akshare_index_symbol(index_code))
+
+    df = call_with_retry(_call, f"{index_code} stock_zh_index_daily", retries, retry_delay)
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    normalized = normalize_daily_df(df, index_code, name)
+    if normalized.empty:
+        return normalized
+
+    start = pd.to_datetime(start_date, format="%Y%m%d", errors="coerce").strftime("%Y-%m-%d")
+    end = pd.to_datetime(end_date, format="%Y%m%d", errors="coerce").strftime("%Y-%m-%d")
+    return normalized[
+        (normalized["trade_date"] >= start)
+        & (normalized["trade_date"] <= end)
+    ]
 
 
 def df_to_rows(df: pd.DataFrame) -> list[tuple]:
@@ -451,15 +459,11 @@ def build_code_name_map(etf_basic: pd.DataFrame) -> dict[str, str]:
 
 
 def update_etf_quotes(args: argparse.Namespace) -> int:
-    token = resolve_tushare_token(args)
-    ts.set_token(token)
-    pro = ts.pro_api(token)
-
     db_path = Path(args.sqlite_db_path).expanduser()
     conn = connect_sqlite(db_path)
     ensure_schema(conn)
 
-    etf_basic = fetch_etf_basic(pro, args.retries, args.retry_delay)
+    etf_basic = fetch_etf_basic(args.retries, args.retry_delay)
     basic_count = 0 if args.dry_run else upsert_etf_basic(conn, etf_basic)
     name_by_code = build_code_name_map(etf_basic)
 
@@ -469,42 +473,66 @@ def update_etf_quotes(args: argparse.Namespace) -> int:
         codes = sorted(name_by_code)
 
     if not codes:
-        raise RuntimeError("没有可更新的 ETF 代码。请检查 TuShare etf_basic 是否可用，或通过 --codes 指定。")
+        raise RuntimeError("没有可更新的 ETF 代码。请检查 AkShare ETF 列表是否可用，或通过 --codes 指定。")
 
-    tasks: list[tuple[str, str, str | None]] = []
+    tasks: list[tuple[str, str, str | None, str]] = []
     skipped = 0
     for code in codes:
         start = effective_start_date(conn, code, args.start_date, args.force_full)
         if start is None or start > args.end_date:
             skipped += 1
             continue
-        tasks.append((code, start, name_by_code.get(code)))
+        tasks.append((code, start, name_by_code.get(code), "etf"))
+
+    benchmark_codes = [normalize_code(code) for code in (args.benchmark_codes or []) if normalize_code(code)]
+    for code in benchmark_codes:
+        start = effective_start_date(conn, code, args.start_date, args.force_full)
+        if start is None or start > args.end_date:
+            skipped += 1
+            continue
+        tasks.append((code, start, DEFAULT_INDEX_NAMES.get(code, code), "index"))
 
     log(f"SQLite: {db_path}")
     log(f"ETF列表: {len(etf_basic)} 条，已写入 {basic_count} 条")
-    log(f"行情任务: {len(tasks)} 只 ETF，跳过已最新 {skipped} 只")
+    log(f"行情任务: {len(tasks)} 个标的，跳过已最新 {skipped} 个")
 
     total_rows = 0
     failed: list[tuple[str, str]] = []
     workers = max(1, int(args.max_workers))
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_map = {
-            executor.submit(
-                fetch_etf_daily,
-                pro,
-                code,
-                name,
-                start,
-                args.end_date,
-                args.adj,
-                args.retries,
-                args.retry_delay,
-            ): (code, start)
-            for code, start, name in tasks
-        }
+        future_map = {}
+        for code, start, name, kind in tasks:
+            if kind == "index":
+                future = executor.submit(
+                    fetch_index_daily,
+                    code,
+                    name,
+                    start,
+                    args.end_date,
+                    args.retries,
+                    args.retry_delay,
+                )
+            else:
+                future = executor.submit(
+                    fetch_etf_daily,
+                    code,
+                    name,
+                    start,
+                    args.end_date,
+                    args.adj,
+                    args.retries,
+                    args.retry_delay,
+                )
+            future_map[future] = (code, start)
 
-        with tqdm(total=len(future_map), desc="ETF行情更新", unit="只", dynamic_ncols=True) as bar:
+        with tqdm(
+            total=len(future_map),
+            desc="行情更新",
+            unit="个",
+            dynamic_ncols=True,
+            disable=bool(getattr(args, "no_progress", False)),
+        ) as bar:
             for future in as_completed(future_map):
                 code, start = future_map[future]
                 try:
@@ -535,26 +563,19 @@ def update_etf_quotes(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="只更新 ETF 日线行情到 SQLite")
+    parser = argparse.ArgumentParser(description="使用 AkShare 更新 ETF 日线行情到 SQLite")
     parser.add_argument("--start-date", type=parse_yyyymmdd, default="20000101", help="起始日期 YYYYMMDD，默认 20000101")
     parser.add_argument("--end-date", type=parse_yyyymmdd, default=today_yyyymmdd(), help="结束日期 YYYYMMDD，默认今天")
     parser.add_argument("--codes", nargs="*", help="仅更新指定 ETF 代码；不传则更新当前上市全部 ETF")
+    parser.add_argument("--benchmark-codes", nargs="*", default=DEFAULT_BENCHMARK_CODES, help="同时更新的基准指数代码；默认 000001.SH 000300.SH，传空值可禁用")
     parser.add_argument("--sqlite-db-path", default=str(DEFAULT_DB_PATH), help=f"SQLite 数据库文件，默认 {DEFAULT_DB_PATH}")
     parser.add_argument("--max-workers", type=int, default=int(os.getenv("ETF_UPDATE_MAX_WORKERS", "4")), help="并发拉取数量，默认 4")
     parser.add_argument("--force-full", action="store_true", help="忽略库内最新日期，按 start-date 全量覆盖更新")
     parser.add_argument("--dry-run", action="store_true", help="只拉取不写入 SQLite")
-    parser.add_argument("--adj", default=os.getenv("PRO_BAR_ADJ", "").strip(), help="传给 ts.pro_bar 的复权参数，如 qfq/hfq；默认不复权")
-    parser.add_argument("--retries", type=int, default=int(os.getenv("TS_RETRY_TIMES", "3")), help="TuShare 调用失败重试次数")
-    parser.add_argument("--retry-delay", type=float, default=float(os.getenv("TS_RETRY_DELAY", "2.0")), help="重试退避基准秒数")
-    parser.add_argument(
-        "--tushare-token",
-        "--ts-token",
-        dest="tushare_tokens",
-        action="append",
-        help="TuShare token；也可设置 TUSHARE_TOKEN/TUSHARETOKEN/TS_TOKEN",
-    )
-    parser.add_argument("--tushare-token-env", help="从指定环境变量读取 TuShare token")
-    parser.add_argument("--tushare-token-prompt", action="store_true", help="启动后交互输入 TuShare token")
+    parser.add_argument("--adj", default=os.getenv("AKSHARE_ADJ", "").strip(), choices=["", "qfq", "hfq"], help="AkShare 复权参数：qfq/hfq；默认不复权")
+    parser.add_argument("--retries", type=int, default=int(os.getenv("AKSHARE_RETRY_TIMES", "5")), help="AkShare 单次调用尝试次数，默认 5")
+    parser.add_argument("--retry-delay", type=float, default=float(os.getenv("AKSHARE_RETRY_DELAY", "2.0")), help="重试退避基准秒数")
+    parser.add_argument("--no-progress", action="store_true", help="不显示 tqdm 进度条，适合定时任务日志")
     return parser
 
 

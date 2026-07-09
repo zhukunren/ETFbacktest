@@ -14,7 +14,14 @@ class FakeMarketDataService:
 
     def get_price_data(self, stock_codes, start_date, end_date):
         codes = set(stock_codes)
-        df = self.price_df[self.price_df["stock_code"].isin(codes)].copy()
+        frames = []
+        for source_df in (self.price_df, self.benchmark_df):
+            if source_df.empty:
+                continue
+            frames.append(source_df[source_df["stock_code"].isin(codes)].copy())
+        if not frames:
+            return pd.DataFrame(columns=["trade_date", "stock_code", "adj_close"])
+        df = pd.concat(frames, ignore_index=True)
         return df[
             (df["trade_date"] >= start_date)
             & (df["trade_date"] <= end_date)
@@ -29,7 +36,7 @@ class FakeMarketDataService:
 
 
 class RebalanceEngineTest(unittest.TestCase):
-    def test_initial_rebalance_uses_initial_capital_and_charges_buy_fee(self):
+    def test_initial_rebalance_uses_unit_nav_and_charges_buy_fee(self):
         dates = ["2015-01-05", "2015-01-06", "2015-02-02"]
         price_df = pd.DataFrame([
             {"trade_date": date, "stock_code": "510300.SH", "adj_close": 10.0}
@@ -39,8 +46,11 @@ class RebalanceEngineTest(unittest.TestCase):
             for date in dates
         ])
         benchmark_df = pd.DataFrame([
-            {"trade_date": date, "stock_code": "000001.SH", "adj_close": 100.0 + index}
-            for index, date in enumerate(dates)
+            {"trade_date": date, "stock_code": "000001.SH", "adj_close": price}
+            for date, price in zip(dates, [100.0, 110.0, 120.0])
+        ] + [
+            {"trade_date": date, "stock_code": "000300.SH", "adj_close": price}
+            for date, price in zip(dates, [200.0, 220.0, 260.0])
         ])
         fake_service = FakeMarketDataService(price_df, benchmark_df)
         request = BacktestRequest(
@@ -51,10 +61,12 @@ class RebalanceEngineTest(unittest.TestCase):
             start_date="2015-01-01",
             end_date="2015-02-28",
             rebalance_freq="month_start",
-            initial_capital=100000.0,
             buy_fee_rate=0.0003,
             sell_fee_rate=0.0003,
-            benchmark_code="000001.SH",
+            benchmark_list=[
+                {"stock_code": "000001.SH", "weight": 0.5},
+                {"stock_code": "000300.SH", "weight": 0.5},
+            ],
         )
 
         with patch("backend.engine.rebalance_engine.market_data_service", fake_service):
@@ -62,9 +74,10 @@ class RebalanceEngineTest(unittest.TestCase):
 
         first_net_value = result.net_value_series[0]["net_value"]
         self.assertAlmostEqual(first_net_value, 1 / 1.0003, places=8)
-        self.assertGreater(result.metrics["final_value"], 0)
+        self.assertGreater(result.metrics["final_net_value"], 0)
         self.assertEqual(result.metrics["rebalance_count"], 2)
         self.assertEqual(len(result.benchmark_series), 3)
+        self.assertAlmostEqual(result.benchmark_series[-1]["net_value"], 1.25, places=8)
         self.assertEqual(set(result.asset_return_series), {"510300.SH", "510500.SH"})
         self.assertEqual(len(result.asset_return_series["510300.SH"]), 3)
 
@@ -90,10 +103,9 @@ class RebalanceEngineTest(unittest.TestCase):
             start_date="2017-08-21",
             end_date="2017-08-25",
             rebalance_freq="month_start",
-            initial_capital=100000.0,
             buy_fee_rate=0.0003,
             sell_fee_rate=0.0003,
-            benchmark_code="000001.SH",
+            benchmark_list=[{"stock_code": "000001.SH", "weight": 1.0}],
         )
 
         with patch("backend.engine.rebalance_engine.market_data_service", fake_service):
@@ -104,7 +116,7 @@ class RebalanceEngineTest(unittest.TestCase):
         self.assertEqual(holding["effective_code"], "511260.SH")
         self.assertTrue(holding["cash_substitute"])
         self.assertEqual(holding["shares"], 0.0)
-        self.assertEqual(first_record["cash_after"], 100000.0)
+        self.assertEqual(first_record["cash_after"], 1.0)
         self.assertEqual(first_record["trades"]["511260.SH"]["buy_value"], 0.0)
         self.assertTrue(any("2017-08-24 前无行情" in warning for warning in result.warnings))
         self.assertFalse(any("511010.SH" in warning for warning in result.warnings))
@@ -125,17 +137,16 @@ class RebalanceEngineTest(unittest.TestCase):
             start_date="2024-01-02",
             end_date="2024-01-04",
             rebalance_freq="week_start",
-            initial_capital=100000.0,
             buy_fee_rate=0.0003,
             sell_fee_rate=0.0003,
-            benchmark_code="000001.SH",
+            benchmark_list=[{"stock_code": "000001.SH", "weight": 1.0}],
         )
 
         with patch("backend.engine.rebalance_engine.market_data_service", fake_service):
             result = RebalanceEngine().run_backtest(request)
 
         self.assertTrue(any("全程使用现金替代" in warning for warning in result.warnings))
-        self.assertEqual(result.rebalance_records[0]["cash_after"], 100000.0)
+        self.assertEqual(result.rebalance_records[0]["cash_after"], 1.0)
         self.assertTrue(result.rebalance_records[0]["holdings"]["588999.SH"]["cash_substitute"])
         self.assertEqual(result.asset_return_series["588999.SH"], [])
         self.assertTrue(all(item["net_value"] == 1.0 for item in result.net_value_series))
@@ -163,10 +174,9 @@ class RebalanceEngineTest(unittest.TestCase):
             start_date="2024-01-02",
             end_date="2024-02-01",
             rebalance_freq="none",
-            initial_capital=100000.0,
             buy_fee_rate=0.0003,
             sell_fee_rate=0.0003,
-            benchmark_code="000001.SH",
+            benchmark_list=[{"stock_code": "000001.SH", "weight": 1.0}],
         )
 
         with patch("backend.engine.rebalance_engine.market_data_service", fake_service):

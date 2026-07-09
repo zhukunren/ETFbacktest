@@ -6,18 +6,11 @@
 # 进入后端目录
 cd D:\项目\ETF再均衡回测系统\backend
 
-# 配置数据库（复制 .env.example 为 .env）
+# 配置SQLite数据库路径（复制 .env.example 为 .env）
 Copy-Item .env.example .env
 
-# 编辑 .env 文件，填入你的数据库信息
-# DB_HOST=localhost
-# DB_PORT=3306
-# DB_NAME=etf_data
-# ETF_DB_NAME=etf_data
-# INDEX_DB_NAME=stock_data
-# MYSQL_USER=root
-# MYSQL_PASSWORD=你的密码
-# TUSHARE_TOKEN=你的tushare token
+# 编辑 .env 文件，确认SQLite数据库文件路径
+# SQLITE_DB_PATH=data/market_data.sqlite3
 # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 
 # 安装依赖
@@ -46,18 +39,20 @@ npm run dev
 
 1. 浏览器打开 http://localhost:5173
 2. 默认组合已载入，也可以点击"添加ETF"调整ETF
-3. 设置每个ETF的权重，权重总和必须为1
-4. 配置回测参数（日期、再均衡频率、初始资金、交易费率、基准代码）
+3. 设置每个ETF的权重，运行回测时权重总和必须为1
+4. 配置回测参数（日期、再均衡频率、交易费率、基准组合权重）
 5. 点击"运行回测"查看结果
 
 ## 注意事项
 
-- 确保MySQL数据库已启动，并包含 `stock_daily_price` 单表或 `510300_SH` 这类按代码分表；MySQL只用于回测行情
-- ETF选择列表优先从Tushare拉取当前上市ETF，请设置 `TUSHARE_TOKEN` 或 `TUSHARETOKEN`；无法拉取时读取 `data\ETF列表.xlsx`
-- 如果页面提示数据库连接失败，先打开 http://127.0.0.1:8000/api/config/status 检查后端是否读到数据库、密码和token等配置
+- 可执行 `python tools/updata_data.py --start-date 20150101` 用AkShare更新SQLite行情库
+- 已提供 `deploy/systemd/etf-data-update.timer`，可配置每天21:00自动更新行情
+- SQLite数据库支持 `etf_daily_price`、`stock_daily_price` 单表或 `510300_SH` 这类按代码分表；SQLite只用于回测行情
+- ETF选择列表优先读取SQLite，缺失时从AkShare拉取，失败时读取 `data\ETF列表.xlsx`
+- 如果页面提示数据库连接失败，先打开前端同源地址 `/api/config/status`，例如 http://127.0.0.1:5173/api/config/status，检查前端代理和后端SQLite状态
 - ETF无行情期间会自动保留对应目标权重为现金，并在回测结果中提示
 - 默认买入/卖出费率均为0.0003
-- 权重总和必须为1（系统会自动归一化）
+- 权重总和必须为1；系统不会自动改动已输入权重，点击"归一化"才会主动调整
 - 首次运行可能需要等待数据加载
 
 ## 目录结构

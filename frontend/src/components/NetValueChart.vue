@@ -15,7 +15,7 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
-  benchmarkCode: {
+  benchmarkLabel: {
     type: String,
     required: true
   }
@@ -43,8 +43,9 @@ const renderChart = async () => {
     },
     legend: {
       top: 0,
-      right: 0,
-      data: ['策略净值', props.benchmarkCode]
+      left: 8,
+      itemGap: 28,
+      data: ['策略净值', props.benchmarkLabel]
     },
     dataset: [
       { id: 'strategy', source: strategySource },
@@ -52,9 +53,9 @@ const renderChart = async () => {
     ],
     grid: {
       left: 8,
-      right: 18,
-      bottom: 8,
-      top: 42,
+      right: 20,
+      bottom: 56,
+      top: 54,
       containLabel: true
     },
     xAxis: {
@@ -69,10 +70,26 @@ const renderChart = async () => {
       scale: true,
       splitLine: {
         lineStyle: {
-          color: '#E5E7EB'
+          color: '#E5E7EB',
+          type: 'dashed'
         }
       }
     },
+    dataZoom: [
+      {
+        type: 'slider',
+        height: 28,
+        bottom: 8,
+        borderColor: '#CBD5E1',
+        fillerColor: 'rgba(37, 99, 235, 0.12)',
+        handleSize: 18,
+        showDetail: false,
+        brushSelect: false
+      },
+      {
+        type: 'inside'
+      }
+    ],
     series: [
       {
         name: '策略净值',
@@ -85,7 +102,7 @@ const renderChart = async () => {
         areaStyle: { opacity: 0.08 }
       },
       {
-        name: props.benchmarkCode,
+        name: props.benchmarkLabel,
         type: 'line',
         datasetId: 'benchmark',
         encode: { x: 0, y: 1 },
@@ -102,7 +119,7 @@ const resizeChart = () => {
 }
 
 watch(
-  () => [props.netValueSeries, props.benchmarkSeries, props.benchmarkCode],
+  () => [props.netValueSeries, props.benchmarkSeries, props.benchmarkLabel],
   renderChart,
   { deep: true }
 )
@@ -121,8 +138,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chart-surface {
-  height: 420px;
-  min-height: 320px;
+  height: 500px;
+  min-height: 420px;
   width: 100%;
 }
 

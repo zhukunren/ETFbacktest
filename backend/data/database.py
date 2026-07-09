@@ -1,5 +1,5 @@
-import pymysql
-from typing import Optional
+import sqlite3
+from typing import Optional, Sequence
 import pandas as pd
 from ..config import settings
 
@@ -11,16 +11,11 @@ class Database:
     def connect(self):
         """建立数据库连接"""
         try:
-            settings.validate_database_credentials()
-            return pymysql.connect(
-                host=settings.DB_HOST,
-                port=settings.DB_PORT,
-                user=settings.DB_USER,
-                password=settings.DB_PASSWORD,
-                database=settings.DB_NAME,
-                charset='utf8mb4',
-                cursorclass=pymysql.cursors.DictCursor
-            )
+            db_path = settings.sqlite_db_path()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            connection = sqlite3.connect(db_path)
+            connection.row_factory = sqlite3.Row
+            return connection
         except Exception as e:
             raise Exception(f"Database connection failed: {str(e)}")
 
@@ -29,18 +24,18 @@ class Database:
         if self.connection:
             self.connection.close()
 
-    def query_to_dataframe(self, sql: str, params: Optional[tuple] = None) -> pd.DataFrame:
+    def query_to_dataframe(self, sql: str, params: Optional[Sequence] = None) -> pd.DataFrame:
         """执行查询并返回DataFrame"""
         try:
             connection = self.connect()
             try:
-                with connection.cursor() as cursor:
-                    cursor.execute(sql, params)
-                    rows = cursor.fetchall()
-                    columns = [column[0] for column in cursor.description] if cursor.description else []
+                cursor = connection.cursor()
+                cursor.execute(sql, tuple(params or ()))
+                rows = cursor.fetchall()
+                columns = [column[0] for column in cursor.description] if cursor.description else []
             finally:
                 connection.close()
-            return pd.DataFrame(rows, columns=columns)
+            return pd.DataFrame([dict(row) for row in rows], columns=columns)
         except Exception as e:
             raise Exception(f"Query execution failed: {str(e)}")
 

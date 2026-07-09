@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Search } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -48,12 +48,30 @@ const props = defineProps({
   etfList: {
     type: Array,
     required: true
+  },
+  initialSearchText: {
+    type: String,
+    default: ''
   }
 })
 
 defineEmits(['update:modelValue', 'select'])
 
 const searchText = ref('')
+
+watch(
+  () => props.modelValue,
+  value => {
+    if (value) searchText.value = props.initialSearchText || ''
+  }
+)
+
+watch(
+  () => props.initialSearchText,
+  value => {
+    if (props.modelValue) searchText.value = value || ''
+  }
+)
 
 const filteredETFList = computed(() => {
   const keyword = normalizeSearchText(searchText.value)
@@ -79,7 +97,7 @@ const normalizeSearchText = (value) => (
 )
 
 const sourceLabel = (source) => {
-  if (source === 'tushare') return 'Tushare'
+  if (source === 'akshare') return 'AkShare'
   if (source === 'excel') return 'Excel'
   return '本地'
 }

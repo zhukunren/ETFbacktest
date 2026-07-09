@@ -26,14 +26,20 @@ class RebalanceEngine:
         stock_codes = list(weights_dict.keys())
         weights = normalize_weights(list(weights_dict.values()))
         weights_dict = dict(zip(stock_codes, weights))
+        benchmark_weights_dict = {
+            item.stock_code: item.weight
+            for item in request.benchmark_list
+        }
+        if len(benchmark_weights_dict) != len(request.benchmark_list):
+            raise ValueError("基准代码不能重复")
 
         price_df = market_data_service.get_price_data(
             stock_codes,
             request.start_date,
             request.end_date
         )
-        benchmark_df = market_data_service.get_benchmark_data(
-            request.benchmark_code,
+        benchmark_df = market_data_service.get_price_data(
+            list(benchmark_weights_dict.keys()),
             request.start_date,
             request.end_date,
         )
@@ -64,13 +70,13 @@ class RebalanceEngine:
             stock_codes=stock_codes,
             weights_dict=weights_dict,
             rebalance_dates=rebalance_dates,
-            initial_capital=request.initial_capital,
+            base_value=1.0,
             buy_fee_rate=request.buy_fee_rate,
             sell_fee_rate=request.sell_fee_rate,
         )
 
         benchmark_series, benchmark_warnings = self._build_benchmark_series(
-            benchmark_code=request.benchmark_code,
+            benchmark_weights=benchmark_weights_dict,
             start_date=request.start_date,
             end_date=request.end_date,
             trading_dates=trading_dates,
@@ -80,12 +86,10 @@ class RebalanceEngine:
 
         metrics = self._calculate_metrics(
             net_values,
-            request.initial_capital,
             rebalance_count=len(rebalance_records)
         )
         benchmark_metrics = self._calculate_metrics(
             benchmark_series,
-            request.initial_capital,
             rebalance_count=0
         ) if benchmark_series else {}
 
@@ -192,11 +196,11 @@ class RebalanceEngine:
         stock_codes: List[str],
         weights_dict: Dict[str, float],
         rebalance_dates: set,
-        initial_capital: float,
+        base_value: float,
         buy_fee_rate: float,
         sell_fee_rate: float,
     ) -> Tuple[List[dict], List[dict]]:
-        cash = initial_capital
+        cash = base_value
         holdings = {code: 0.0 for code in stock_codes}
         net_values = []
         rebalance_records = []
@@ -226,7 +230,7 @@ class RebalanceEngine:
             portfolio_value = self._portfolio_value(cash, holdings, current_prices, stock_codes)
             net_values.append({
                 "date": date_str,
-                "net_value": float(portfolio_value / initial_capital),
+                "net_value": float(portfolio_value / base_value),
             })
 
         return net_values, rebalance_records
@@ -353,21 +357,26 @@ class RebalanceEngine:
 
     def _build_benchmark_series(
         self,
-        benchmark_code: str,
+        benchmark_weights: Dict[str, float],
         start_date: str,
         end_date: str,
         trading_dates: List[str],
         benchmark_df: pd.DataFrame | None = None,
     ) -> Tuple[List[dict], List[str]]:
         warnings = []
+        benchmark_codes = list(benchmark_weights.keys())
+        if not benchmark_codes:
+            warnings.append("未选择基准指数，未生成基准曲线")
+            return [], warnings
+
         if benchmark_df is None:
-            benchmark_df = market_data_service.get_benchmark_data(
-                benchmark_code,
+            benchmark_df = market_data_service.get_price_data(
+                benchmark_codes,
                 start_date,
                 end_date
             )
         if benchmark_df.empty:
-            warnings.append(f"基准 {benchmark_code} 无行情，未生成基准曲线")
+            warnings.append("所选基准指数无行情，未生成基准曲线")
             return [], warnings
 
         benchmark_pivot = benchmark_df.pivot_table(
@@ -376,23 +385,48 @@ class RebalanceEngine:
             values="adj_close",
             aggfunc="last"
         ).sort_index()
-        if benchmark_code not in benchmark_pivot.columns:
-            warnings.append(f"基准 {benchmark_code} 无行情，未生成基准曲线")
+
+        benchmark_pivot.index = pd.to_datetime(benchmark_pivot.index).strftime("%Y-%m-%d")
+        benchmark_pivot = benchmark_pivot.reindex(trading_dates)
+
+        missing_codes = [
+            code for code in benchmark_codes
+            if code not in benchmark_pivot.columns or benchmark_pivot[code].dropna().empty
+        ]
+        if missing_codes:
+            warnings.append(f"基准 {', '.join(missing_codes)} 无行情，未生成基准曲线")
             return [], warnings
 
-        benchmark_prices = benchmark_pivot[benchmark_code].reindex(trading_dates).dropna()
-        if benchmark_prices.empty:
-            warnings.append(f"基准 {benchmark_code} 与策略交易日无交集，未生成基准曲线")
+        filled_prices = pd.DataFrame(index=benchmark_pivot.index)
+        for code in benchmark_codes:
+            prices = pd.to_numeric(benchmark_pivot[code], errors="coerce")
+            prices = prices.where(prices > 0)
+            first_valid_index = prices.first_valid_index()
+            if first_valid_index is None:
+                warnings.append(f"基准 {code} 与策略交易日无交集，未生成基准曲线")
+                return [], warnings
+            filled = prices.copy()
+            filled.loc[first_valid_index:] = filled.loc[first_valid_index:].ffill()
+            filled_prices[code] = filled
+
+        complete_prices = filled_prices.dropna()
+        if complete_prices.empty:
+            warnings.append("所选基准指数没有共同行情日期，未生成基准曲线")
             return [], warnings
 
-        first_price = float(benchmark_prices.iloc[0])
-        if first_price <= 0:
-            warnings.append(f"基准 {benchmark_code} 首日价格无效，未生成基准曲线")
+        common_start = complete_prices.index[0]
+        base_prices = complete_prices.loc[common_start]
+        if (base_prices <= 0).any():
+            warnings.append("所选基准指数共同首日价格无效，未生成基准曲线")
             return [], warnings
+
+        normalized = complete_prices.loc[common_start:].divide(base_prices)
+        weighted_series = normalized.mul(pd.Series(benchmark_weights), axis=1).sum(axis=1)
 
         return [
-            {"date": str(date), "net_value": float(price / first_price)}
-            for date, price in benchmark_prices.items()
+            {"date": str(date), "net_value": float(net_value)}
+            for date, net_value in weighted_series.items()
+            if pd.notna(net_value)
         ], warnings
 
     def _build_asset_return_series(
@@ -421,7 +455,6 @@ class RebalanceEngine:
     def _calculate_metrics(
         self,
         net_values: List[dict],
-        initial_capital: float,
         rebalance_count: int
     ) -> dict:
         """计算回测指标"""
@@ -457,7 +490,7 @@ class RebalanceEngine:
             "max_drawdown": float(max_drawdown),
             "volatility": float(volatility),
             "sharpe_ratio": float(sharpe_ratio),
-            "final_value": float(nv_series.iloc[-1] * initial_capital),
+            "final_net_value": float(nv_series.iloc[-1]),
             "rebalance_count": int(rebalance_count),
         }
 

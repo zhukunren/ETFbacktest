@@ -14,9 +14,9 @@ def normalize_stock_code(stock_code: str) -> str:
         return f"{base}.{exchange}"
 
     if len(code) == 6 and code.isdigit():
-        if code.startswith(("50", "51", "56", "58")) or code == "000001":
+        if code.startswith(("50", "51", "52", "53", "56", "58", "000")):
             return f"{code}.SH"
-        if code.startswith(("15", "16", "18")):
+        if code.startswith(("15", "16", "18", "399")):
             return f"{code}.SZ"
 
     return code
@@ -35,6 +35,26 @@ class ETFWeight(BaseModel):
         return code
 
 
+class BenchmarkWeight(BaseModel):
+    stock_code: str = Field(..., description="基准指数代码")
+    weight: float = Field(..., ge=0, le=1, description="基准权重，0-1之间")
+
+    @field_validator("stock_code")
+    @classmethod
+    def normalize_code(cls, value: str) -> str:
+        code = normalize_stock_code(value)
+        if not code:
+            raise ValueError("基准代码不能为空")
+        return code
+
+
+def default_benchmark_list() -> List[BenchmarkWeight]:
+    return [
+        BenchmarkWeight(stock_code="000001.SH", weight=0.5),
+        BenchmarkWeight(stock_code="000300.SH", weight=0.5),
+    ]
+
+
 class BacktestRequest(BaseModel):
     etf_list: List[ETFWeight] = Field(..., description="ETF列表及权重")
     start_date: str = Field(..., description="回测开始日期 YYYY-MM-DD")
@@ -42,10 +62,12 @@ class BacktestRequest(BaseModel):
     rebalance_freq: Literal["none", "month_start", "month_end", "week_start", "week_end"] = Field(
         ..., description="再均衡频率"
     )
-    initial_capital: float = Field(100000.0, gt=0, description="初始资金")
     buy_fee_rate: float = Field(0.0003, ge=0, le=0.1, description="买入费率")
     sell_fee_rate: float = Field(0.0003, ge=0, le=0.1, description="卖出费率")
-    benchmark_code: str = Field("000001.SH", description="基准代码")
+    benchmark_list: List[BenchmarkWeight] = Field(
+        default_factory=default_benchmark_list,
+        description="基准指数列表及权重",
+    )
 
     @field_validator("start_date", "end_date")
     @classmethod
@@ -56,20 +78,14 @@ class BacktestRequest(BaseModel):
             raise ValueError("日期格式必须为 YYYY-MM-DD") from exc
         return value
 
-    @field_validator("benchmark_code")
-    @classmethod
-    def normalize_benchmark_code(cls, value: str) -> str:
-        code = normalize_stock_code(value)
-        if not code:
-            raise ValueError("基准代码不能为空")
-        return code
-
     @model_validator(mode="after")
     def validate_period(self):
         if self.start_date > self.end_date:
             raise ValueError("开始日期不能晚于结束日期")
         if not self.etf_list:
             raise ValueError("至少需要选择一个ETF")
+        if not self.benchmark_list:
+            raise ValueError("至少需要选择一个基准指数")
         return self
 
     model_config = ConfigDict(
@@ -88,10 +104,12 @@ class BacktestRequest(BaseModel):
                 "start_date": "2015-01-01",
                 "end_date": "2026-07-04",
                 "rebalance_freq": "month_start",
-                "initial_capital": 100000.0,
                 "buy_fee_rate": 0.0003,
                 "sell_fee_rate": 0.0003,
-                "benchmark_code": "000001.SH"
+                "benchmark_list": [
+                    {"stock_code": "000001.SH", "weight": 0.5},
+                    {"stock_code": "000300.SH", "weight": 0.5}
+                ]
             }
         }
     )

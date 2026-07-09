@@ -1,26 +1,43 @@
 <template>
   <section class="results-panel">
-    <div class="panel-heading">
-      <div>
-        <p class="eyebrow">Workbench</p>
-        <h2>回测工作台</h2>
+    <div class="results-toolbar">
+      <div class="tab-strip">
+        <button
+          v-for="tab in tabs"
+          :key="tab.name"
+          type="button"
+          class="tab-button"
+          :class="{ active: activeTab === tab.name }"
+          @click="activeTab = tab.name"
+        >
+          {{ tab.label }}
+        </button>
       </div>
       <div class="heading-actions">
-        <el-button :icon="Download" @click="exportNetValueCsv">导出净值</el-button>
-        <el-button :icon="Document" @click="exportJson">导出JSON</el-button>
+        <el-button :icon="Download" @click="exportNetValueCsv">导出图表</el-button>
+        <el-button :icon="Grid" @click="exportJson">导出数据</el-button>
       </div>
     </div>
 
-    <el-tabs v-model="activeTab" class="result-tabs">
-      <el-tab-pane label="概览" name="overview">
+    <template v-if="activeTab === 'overview'">
         <div class="metrics-grid">
           <div
             v-for="metric in metrics"
             :key="metric.key"
             class="metric-card"
+            :class="`metric-${metric.tone}`"
           >
-            <span class="metric-label">{{ metric.label }}</span>
-            <strong :class="metric.className">{{ metric.value }}</strong>
+            <div class="metric-title">
+              <span>{{ metric.label }}</span>
+              <el-icon><InfoFilled /></el-icon>
+            </div>
+            <div class="metric-body">
+              <span class="metric-icon">
+                <el-icon><component :is="metric.icon" /></el-icon>
+              </span>
+              <strong :class="metric.className">{{ metric.value }}</strong>
+            </div>
+            <p>{{ metric.hint }}</p>
           </div>
         </div>
 
@@ -35,20 +52,35 @@
           />
         </div>
 
-        <div class="result-section">
-          <div class="section-title">
-            <h3>净值曲线</h3>
-            <el-tag effect="plain">{{ result.net_value_series.length }} 个交易日</el-tag>
+        <div class="result-section chart-section">
+          <div class="section-title chart-title">
+            <div>
+              <h3>净值曲线</h3>
+              <el-icon><InfoFilled /></el-icon>
+            </div>
+            <div class="chart-tools">
+              <el-button
+                v-for="range in chartRanges"
+                :key="range.value"
+                :type="activeChartRange === range.value ? 'primary' : ''"
+                plain
+                @click="activeChartRange = range.value"
+              >
+                {{ range.label }}
+              </el-button>
+              <el-button :icon="FullScreen" text aria-label="全屏" />
+            </div>
           </div>
           <NetValueChart
-            :net-value-series="result.net_value_series"
-            :benchmark-series="result.benchmark_series"
-            :benchmark-code="benchmarkCode"
+            :net-value-series="filteredNetValueSeries"
+            :benchmark-series="filteredBenchmarkSeries"
+            :benchmark-label="benchmarkLabel"
           />
+          <p class="chart-note">提示：图表显示复权净值，考虑了分红再投资。</p>
         </div>
-      </el-tab-pane>
+    </template>
 
-      <el-tab-pane label="资产曲线" name="assets" lazy>
+    <template v-else-if="activeTab === 'assets'">
         <div class="result-section">
           <div class="section-title">
             <h3>单资产净值</h3>
@@ -74,9 +106,9 @@
             :active="activeTab === 'assets'"
           />
         </div>
-      </el-tab-pane>
+    </template>
 
-      <el-tab-pane label="调仓记录" name="records">
+    <template v-else>
         <div class="result-section">
           <div class="section-title">
             <h3>再均衡记录</h3>
@@ -141,14 +173,24 @@
             </el-table-column>
           </el-table>
         </div>
-      </el-tab-pane>
-    </el-tabs>
+    </template>
   </section>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { Document, Download } from '@element-plus/icons-vue'
+import {
+  Aim,
+  BottomRight,
+  DataLine,
+  Download,
+  FullScreen,
+  Grid,
+  Histogram,
+  InfoFilled,
+  Money,
+  TrendCharts
+} from '@element-plus/icons-vue'
 import AssetReturnChart from './AssetReturnChart.vue'
 import NetValueChart from './NetValueChart.vue'
 import { formatNumber, formatPercent } from '../utils/format'
@@ -158,14 +200,26 @@ const props = defineProps({
     type: Object,
     required: true
   },
-  benchmarkCode: {
+  benchmarkLabel: {
     type: String,
     required: true
   }
 })
 
 const activeTab = ref('overview')
+const activeChartRange = ref('all')
 const selectedAssetCodes = ref([])
+const tabs = [
+  { name: 'overview', label: '概览' },
+  { name: 'assets', label: '资产曲线' },
+  { name: 'records', label: '调仓记录' }
+]
+const chartRanges = [
+  { label: '近1年', value: '1y', years: 1 },
+  { label: '近3年', value: '3y', years: 3 },
+  { label: '近5年', value: '5y', years: 5 },
+  { label: '全部', value: 'all', years: null }
+]
 
 const metrics = computed(() => {
   const metricsValue = props.result.metrics || {}
@@ -174,37 +228,55 @@ const metrics = computed(() => {
       key: 'total_return',
       label: '总收益率',
       value: formatPercent(metricsValue.total_return),
-      className: Number(metricsValue.total_return) >= 0 ? 'positive' : 'negative'
+      className: Number(metricsValue.total_return) >= 0 ? 'positive' : 'negative',
+      hint: `年化收益 ${formatPercent(metricsValue.annual_return)}`,
+      icon: TrendCharts,
+      tone: 'blue'
     },
     {
       key: 'annual_return',
       label: '年化收益率',
       value: formatPercent(metricsValue.annual_return),
-      className: Number(metricsValue.annual_return) >= 0 ? 'positive' : 'negative'
+      className: Number(metricsValue.annual_return) >= 0 ? 'positive' : 'negative',
+      hint: '日均收益 --',
+      icon: Histogram,
+      tone: 'green'
     },
     {
       key: 'max_drawdown',
       label: '最大回撤',
       value: formatPercent(metricsValue.max_drawdown),
-      className: 'negative'
+      className: 'negative',
+      hint: '回撤开始 --',
+      icon: BottomRight,
+      tone: 'red'
     },
     {
       key: 'volatility',
       label: '波动率',
       value: formatPercent(metricsValue.volatility),
-      className: ''
+      className: '',
+      hint: '年化波动率',
+      icon: DataLine,
+      tone: 'purple'
     },
     {
       key: 'sharpe_ratio',
       label: '夏普比率',
       value: formatNumber(metricsValue.sharpe_ratio),
-      className: ''
+      className: '',
+      hint: '无风险利率 2.50%',
+      icon: Aim,
+      tone: 'teal'
     },
     {
-      key: 'final_value',
-      label: '期末资产',
-      value: formatNumber(metricsValue.final_value),
-      className: ''
+      key: 'final_net_value',
+      label: '期末净值',
+      value: formatNumber(metricsValue.final_net_value, 4),
+      className: 'primary',
+      hint: '初始净值 1.0000',
+      icon: Money,
+      tone: 'blue'
     }
   ]
 })
@@ -216,9 +288,60 @@ const visibleAssetCodes = computed(() => (
     : assetCodes.value.slice(0, 6)
 ))
 
+const filteredNetValueSeries = computed(() => (
+  filterSeriesByRange(props.result.net_value_series || [], activeChartRange.value)
+))
+
+const filteredBenchmarkSeries = computed(() => (
+  filterSeriesByRange(props.result.benchmark_series || [], activeChartRange.value)
+))
+
 watch(assetCodes, (codes) => {
   selectedAssetCodes.value = codes.slice(0, 6)
 }, { immediate: true })
+
+watch(
+  () => props.result,
+  () => {
+    activeChartRange.value = 'all'
+  }
+)
+
+const filterSeriesByRange = (series, rangeValue) => {
+  const range = chartRanges.find(item => item.value === rangeValue)
+  if (!range?.years || !series.length) return series
+
+  const lastDate = latestSeriesDate([
+    props.result.net_value_series || [],
+    props.result.benchmark_series || []
+  ])
+  if (!lastDate) return series
+
+  const cutoff = new Date(lastDate.getTime())
+  cutoff.setFullYear(cutoff.getFullYear() - range.years)
+  const cutoffText = formatDateKey(cutoff)
+  return series.filter(item => String(item.date || '') >= cutoffText)
+}
+
+const latestSeriesDate = (seriesList) => {
+  const dates = seriesList
+    .flatMap(series => series.map(item => parseDateKey(item.date)).filter(Boolean))
+  if (!dates.length) return null
+  return new Date(Math.max(...dates.map(date => date.getTime())))
+}
+
+const parseDateKey = (value) => {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+}
+
+const formatDateKey = (date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 const exportJson = () => {
   downloadText(
@@ -233,7 +356,7 @@ const exportNetValueCsv = () => {
     (props.result.benchmark_series || []).map(item => [item.date, item.net_value])
   )
   const rows = [
-    ['date', 'strategy_net_value', `${props.benchmarkCode}_net_value`],
+    ['date', 'strategy_net_value', 'benchmark_net_value'],
     ...(props.result.net_value_series || []).map(item => [
       item.date,
       item.net_value,
@@ -290,92 +413,184 @@ const timestamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 
 .results-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   min-width: 0;
+  padding: 20px;
 }
 
-.panel-heading,
 .heading-actions,
 .section-title,
-.section-actions {
+.section-actions,
+.results-toolbar,
+.tab-strip {
   align-items: center;
   display: flex;
-  gap: 12px;
 }
 
-.panel-heading,
+.results-toolbar,
 .section-title {
   justify-content: space-between;
 }
 
 .heading-actions,
 .section-actions {
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-.eyebrow {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  margin-bottom: 4px;
-  text-transform: uppercase;
-}
-
-h2,
 h3 {
   color: var(--text);
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 700;
   margin: 0;
 }
 
-h2 {
-  font-size: 22px;
+.results-toolbar {
+  border-bottom: 1px solid #E5E7EB;
+  min-height: 50px;
+  padding: 0 0 12px;
 }
 
-h3 {
+.tab-strip {
+  gap: 30px;
+}
+
+.tab-button {
+  background: transparent;
+  border: 0;
+  color: #6B7280;
+  cursor: pointer;
   font-size: 15px;
+  font-weight: 600;
+  line-height: 42px;
+  padding: 0;
+  position: relative;
+  transition: color 0.2s;
 }
 
-.result-tabs {
-  min-width: 0;
+.tab-button:hover {
+  color: #111827;
+}
+
+.tab-button.active {
+  color: #2563EB;
+  font-weight: 700;
+}
+
+.tab-button.active::after {
+  background: #2563EB;
+  border-radius: 2px;
+  bottom: -13px;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
 }
 
 .metrics-grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-bottom: 16px;
 }
 
 .metric-card {
-  background: var(--surface-soft);
+  background: #FFFFFF;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  display: grid;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  min-height: 88px;
-  padding: 14px;
+  min-height: 130px;
+  padding: 20px;
 }
 
-.metric-label {
-  color: var(--muted);
-  font-size: 13px;
+.metric-title,
+.metric-body {
+  align-items: center;
+  display: flex;
+}
+
+.metric-title {
+  color: #6B7280;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.metric-title .el-icon {
+  color: #9CA3AF;
+  font-size: 16px;
+}
+
+.metric-body {
+  gap: 12px;
+  flex: 1;
+  align-items: flex-end;
+}
+
+.metric-icon {
+  align-items: center;
+  border-radius: 10px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 22px;
+  height: 40px;
+  justify-content: center;
+  width: 40px;
 }
 
 .metric-card strong {
   color: var(--text);
-  font-size: 24px;
+  font-size: 32px;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1;
   overflow-wrap: anywhere;
 }
 
+.metric-card p {
+  color: #9CA3AF;
+  font-size: 13px;
+  margin: 0;
+  margin-top: auto;
+}
+
 .metric-card strong.positive {
-  color: var(--profit);
+  color: #15803D;
 }
 
 .metric-card strong.negative {
-  color: var(--loss);
+  color: #DC2626;
+}
+
+.metric-card strong.primary {
+  color: #2563EB;
+}
+
+.metric-blue .metric-icon {
+  background: #DBEAFE;
+  color: #2563EB;
+}
+
+.metric-green .metric-icon {
+  background: #DCFCE7;
+  color: #16A34A;
+}
+
+.metric-red .metric-icon {
+  background: #FEE2E2;
+  color: #DC2626;
+}
+
+.metric-purple .metric-icon {
+  background: #EDE9FE;
+  color: #7C3AED;
+}
+
+.metric-teal .metric-icon {
+  background: #CCFBF1;
+  color: #0F766E;
 }
 
 .warning-list {
@@ -385,14 +600,49 @@ h3 {
 }
 
 .result-section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 16px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 
 .section-title {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.chart-section {
+  min-height: 500px;
+}
+
+.chart-title > div:first-child {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.chart-title .el-icon {
+  color: #6B7280;
+}
+
+.chart-tools {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-tools :deep(.el-button) {
+  min-width: 70px;
+}
+
+.chart-tools :deep(.el-button.is-text) {
+  min-width: 34px;
+}
+
+.chart-note {
+  color: #9CA3AF;
+  font-size: 13px;
+  margin: 6px 0 0;
 }
 
 .asset-filter {
@@ -430,14 +680,25 @@ h3 {
   font-weight: 700;
 }
 
+@media (max-width: 1500px) {
+  .metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 980px) {
   .metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .results-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
 }
 
 @media (max-width: 640px) {
-  .panel-heading,
   .section-title {
     align-items: flex-start;
     flex-direction: column;

@@ -1,0 +1,18 @@
+[Unit]
+Description=ETFbacktest AkShare SQLite data update
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/ETFbacktest
+Environment=PYTHONUNBUFFERED=1
+Environment=ETF_SCHEDULE_START_DATE=20150101
+Environment=ETF_UPDATE_MAX_WORKERS=4
+Environment=AKSHARE_RETRY_TIMES=5
+Environment=AKSHARE_RETRY_DELAY=3
+Environment=ETF_UPDATE_RUN_RETRIES=3
+Environment=ETF_UPDATE_RUN_RETRY_DELAY=300
+Environment="ETF_UPDATE_BENCHMARK_CODES=000001.SH 000300.SH"
+ExecStart=/root/ETFbacktest/backend/.venv/bin/python /root/ETFbacktest/tools/scheduled_update.py
+Nice=5

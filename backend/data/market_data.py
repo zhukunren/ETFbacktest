@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 from .database import get_db
 from ..models.schemas import normalize_stock_code
 from ..config import settings
@@ -17,7 +17,13 @@ DEFAULT_SECURITY_NAMES = {
     "518880.SH": "黄金ETF",
     "510170.SH": "大宗商品ETF",
     "000001.SH": "上证指数",
+    "000016.SH": "上证50",
+    "000300.SH": "沪深300",
+    "000852.SH": "中证1000",
+    "000905.SH": "中证500",
+    "399006.SZ": "创业板指",
 }
+UNIFIED_PRICE_TABLES = ("stock_daily_price", "etf_daily_price")
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 FALLBACK_ETF_LIST_PATH = PROJECT_DIR / "data" / "ETF列表.xlsx"
@@ -33,59 +39,144 @@ class MarketDataService:
         self._columns_cache: Dict[str, set] = {}
 
     def get_etf_list(self) -> List[dict]:
-        """获取当前上市ETF列表。Tushare失败时回退到本地Excel。"""
+        """获取当前上市ETF列表。优先读取SQLite，失败时依次回退到AkShare和本地Excel。"""
         records: Dict[str, dict] = {}
-        tushare_error = None
+        source_errors = []
 
-        try:
-            for record in self._get_etf_list_from_tushare():
+        for loader in (
+            self._get_etf_list_from_sqlite,
+            self._get_etf_list_from_akshare,
+            self._get_etf_list_from_excel,
+        ):
+            try:
+                loaded = loader()
+            except ValueError as exc:
+                source_errors.append(str(exc))
+                continue
+            for record in loaded:
                 self._upsert_etf_record(records, **record)
-        except ValueError as exc:
-            tushare_error = str(exc)
+            if records:
+                break
 
         if not records:
-            for record in self._get_etf_list_from_excel():
-                self._upsert_etf_record(records, **record)
-
-        if not records:
-            detail = f"；Tushare错误: {tushare_error}" if tushare_error else ""
+            detail = "；错误: " + "；".join(source_errors) if source_errors else ""
             raise ValueError(f"未能获取ETF列表，本地Excel也为空{detail}")
 
         return [records[code] for code in sorted(records, key=str.casefold)]
 
-    def _get_etf_list_from_tushare(self) -> List[dict]:
-        token = settings.effective_tushare_token()
-        if not token:
-            raise ValueError("未读取到TUSHARE_TOKEN。请设置环境变量 TUSHARE_TOKEN 或 TUSHARETOKEN 后重启后端。")
+    def _get_etf_list_from_sqlite(self) -> List[dict]:
+        if not self._table_exists("etf_basic"):
+            return []
 
-        try:
-            import tushare as ts
-        except ImportError:
-            raise ValueError("未安装tushare依赖，请在backend目录执行 pip install -r requirements.txt。")
+        columns = self._columns_for_table("etf_basic")
+        if "ts_code" not in columns:
+            return []
 
-        try:
-            ts.set_token(token)
-            pro = ts.pro_api()
-            df = pro.etf_basic(
-                list_status="L",
-                fields="ts_code,extname,index_code,index_name,exchange,mgr_name",
+        select_columns = {
+            "ts_code": "ts_code",
+            "stock_name": "stock_name" if "stock_name" in columns else "NULL",
+            "index_code": "index_code" if "index_code" in columns else "NULL",
+            "index_name": "index_name" if "index_name" in columns else "NULL",
+            "exchange": "exchange" if "exchange" in columns else "NULL",
+            "mgr_name": "mgr_name" if "mgr_name" in columns else "NULL",
+            "source": "source" if "source" in columns else "'sqlite'",
+        }
+        status_filter = "WHERE list_status = 'L'" if "list_status" in columns else ""
+        sql = f"""
+        SELECT
+          {select_columns["ts_code"]} AS stock_code,
+          {select_columns["stock_name"]} AS stock_name,
+          {select_columns["index_code"]} AS index_code,
+          {select_columns["index_name"]} AS index_name,
+          {select_columns["exchange"]} AS exchange,
+          {select_columns["mgr_name"]} AS mgr_name,
+          {select_columns["source"]} AS source
+        FROM {self._qualified_table("etf_basic")}
+        {status_filter}
+        ORDER BY ts_code
+        """
+        df = self.db.query_to_dataframe(sql)
+        if df.empty:
+            return []
+        records = df.to_dict("records")
+        existing_codes = {
+            normalize_stock_code(str(record.get("stock_code") or ""))
+            for record in records
+        }
+        records.extend(self._get_etf_list_from_price_tables(existing_codes))
+        return records
+
+    def _get_etf_list_from_price_tables(self, existing_codes: Optional[set] = None) -> List[dict]:
+        existing_codes = existing_codes or set()
+        records = []
+
+        for table_name in UNIFIED_PRICE_TABLES:
+            if not self._table_exists(table_name):
+                continue
+
+            columns = self._columns_for_table(table_name)
+            code_column = self._code_column_for_unified_table(columns)
+            if not code_column:
+                continue
+
+            name_column = None
+            if "stock_name" in columns:
+                name_column = "stock_name"
+            elif "name" in columns:
+                name_column = "name"
+
+            quoted_code_column = self._quote_identifier(code_column)
+            name_expr = (
+                f"MAX({self._quote_identifier(name_column)})"
+                if name_column
+                else "NULL"
             )
+            sql = f"""
+            SELECT {quoted_code_column} AS stock_code,
+                   {name_expr} AS stock_name
+            FROM {self._qualified_table(table_name)}
+            WHERE {quoted_code_column} IS NOT NULL
+              AND {quoted_code_column} <> ''
+            GROUP BY {quoted_code_column}
+            ORDER BY {quoted_code_column}
+            """
+            df = self.db.query_to_dataframe(sql)
+            if df.empty:
+                continue
+
+            for row in df.to_dict("records"):
+                code = normalize_stock_code(str(row.get("stock_code") or ""))
+                if not code or code in existing_codes or not self._looks_like_etf(code):
+                    continue
+                existing_codes.add(code)
+                records.append({
+                    "stock_code": code,
+                    "stock_name": row.get("stock_name") or DEFAULT_SECURITY_NAMES.get(code, code),
+                    "source": "sqlite",
+                })
+
+        return records
+
+    def _get_etf_list_from_akshare(self) -> List[dict]:
+        try:
+            import akshare as ak
+        except ImportError:
+            raise ValueError("未安装akshare依赖，请在backend目录执行 pip install -r requirements.txt。")
+
+        try:
+            df = ak.fund_etf_spot_em()
         except Exception as exc:
-            raise ValueError(f"Tushare ETF列表拉取失败: {exc}") from exc
+            raise ValueError(f"AkShare ETF列表拉取失败: {exc}") from exc
 
         if df is None or df.empty:
-            raise ValueError("Tushare ETF列表为空，请检查账号权限或稍后重试。")
+            raise ValueError("AkShare ETF列表为空，请稍后重试。")
 
         records = []
         for row in df.to_dict("records"):
             records.append({
-                "stock_code": row.get("ts_code"),
-                "stock_name": row.get("extname"),
-                "index_code": row.get("index_code"),
-                "index_name": row.get("index_name"),
-                "exchange": row.get("exchange"),
-                "mgr_name": row.get("mgr_name"),
-                "source": "tushare",
+                "stock_code": row.get("代码"),
+                "stock_name": row.get("名称"),
+                "source": "akshare",
             })
         return records
 
@@ -215,14 +306,28 @@ class MarketDataService:
 
     def get_trading_calendar(self, start_date: str, end_date: str) -> List[str]:
         """获取交易日历"""
-        sql = f"""
-        SELECT DISTINCT trade_date
-        FROM {self._qualified_table(settings.DB_NAME, "stock_daily_price")}
-        WHERE trade_date >= %s AND trade_date <= %s
-        ORDER BY trade_date
-        """
-        df = self.db.query_to_dataframe(sql, (start_date, end_date))
-        return df['trade_date'].tolist()
+        frames = []
+        for table_name in UNIFIED_PRICE_TABLES:
+            if not self._table_exists(table_name):
+                continue
+            columns = self._columns_for_table(table_name)
+            if "trade_date" not in columns:
+                continue
+            sql = f"""
+            SELECT DISTINCT trade_date
+            FROM {self._qualified_table(table_name)}
+            WHERE trade_date >= ? AND trade_date <= ?
+            """
+            df = self.db.query_to_dataframe(sql, (start_date, end_date))
+            if not df.empty:
+                frames.append(df)
+
+        if not frames:
+            return []
+
+        df = pd.concat(frames, ignore_index=True)
+        dates = pd.to_datetime(df["trade_date"], errors="coerce").dropna()
+        return sorted(dict.fromkeys(dates.dt.strftime("%Y-%m-%d").tolist()))
 
     def _get_price_data_from_unified_table(
         self,
@@ -230,28 +335,37 @@ class MarketDataService:
         start_date: str,
         end_date: str
     ) -> pd.DataFrame:
-        if not self._table_exists("stock_daily_price", settings.DB_NAME):
+        frames = []
+        for table_name in UNIFIED_PRICE_TABLES:
+            if not self._table_exists(table_name):
+                continue
+
+            columns = self._columns_for_table(table_name)
+            code_column = self._code_column_for_unified_table(columns)
+            if "trade_date" not in columns or not code_column or "close" not in columns:
+                continue
+
+            query_codes = self._query_code_variants(stock_codes)
+            placeholders = ",".join(["?"] * len(query_codes))
+            adj_expr = "adj_factor" if "adj_factor" in columns else "1 AS adj_factor"
+            quoted_code_column = self._quote_identifier(code_column)
+            sql = f"""
+            SELECT trade_date, {quoted_code_column} AS stock_code, close, {adj_expr}
+            FROM {self._qualified_table(table_name)}
+            WHERE {quoted_code_column} IN ({placeholders})
+              AND trade_date >= ?
+              AND trade_date <= ?
+            ORDER BY trade_date, {quoted_code_column}
+            """
+            params = tuple(query_codes) + (start_date, end_date)
+            df = self.db.query_to_dataframe(sql, params)
+            if not df.empty:
+                frames.append(df)
+
+        if not frames:
             return pd.DataFrame()
 
-        columns = self._columns_for_table("stock_daily_price", settings.DB_NAME)
-        if "trade_date" not in columns or "stock_code" not in columns or "close" not in columns:
-            return pd.DataFrame()
-
-        query_codes = self._query_code_variants(stock_codes)
-        placeholders = ",".join(["%s"] * len(query_codes))
-        adj_expr = "adj_factor" if "adj_factor" in columns else "1 AS adj_factor"
-        sql = f"""
-        SELECT trade_date, stock_code, close, {adj_expr}
-        FROM {self._qualified_table(settings.DB_NAME, "stock_daily_price")}
-        WHERE stock_code IN ({placeholders})
-          AND trade_date >= %s
-          AND trade_date <= %s
-        ORDER BY trade_date, stock_code
-        """
-        params = tuple(query_codes) + (start_date, end_date)
-        df = self.db.query_to_dataframe(sql, params)
-        if df.empty:
-            return df
+        df = pd.concat(frames, ignore_index=True)
 
         requested_by_base = self._requested_by_base(stock_codes)
         df["stock_code"] = df["stock_code"].map(
@@ -259,6 +373,13 @@ class MarketDataService:
         )
         df = df[df["stock_code"].notna()]
         return self._normalize_price_frame(df)
+
+    def _code_column_for_unified_table(self, columns: set) -> Optional[str]:
+        if "stock_code" in columns:
+            return "stock_code"
+        if "ts_code" in columns:
+            return "ts_code"
+        return None
 
     def _get_price_data_from_code_tables(
         self,
@@ -271,18 +392,18 @@ class MarketDataService:
             code_table = self._find_code_table(code)
             if not code_table:
                 continue
-            schema_name, table_name = code_table
+            table_name = code_table
 
-            columns = self._columns_for_table(table_name, schema_name)
+            columns = self._columns_for_table(table_name)
             if "trade_date" not in columns or "close" not in columns:
                 continue
 
             adj_expr = "adj_factor" if "adj_factor" in columns else "1 AS adj_factor"
             sql = f"""
-            SELECT trade_date, %s AS stock_code, close, {adj_expr}
-            FROM {self._qualified_table(schema_name, table_name)}
-            WHERE trade_date >= %s
-              AND trade_date <= %s
+            SELECT trade_date, ? AS stock_code, close, {adj_expr}
+            FROM {self._qualified_table(table_name)}
+            WHERE trade_date >= ?
+              AND trade_date <= ?
             ORDER BY trade_date
             """
             df = self.db.query_to_dataframe(sql, (code, start_date, end_date))
@@ -332,77 +453,82 @@ class MarketDataService:
             return normalized
         return requested_by_base.get(normalized.split(".")[0])
 
-    def _table_exists(self, table_name: str, schema_name: str) -> bool:
-        cache_key = f"{schema_name}.{table_name}"
+    def _table_exists(self, table_name: str, schema_name: Optional[str] = None) -> bool:
+        cache_key = table_name.lower()
         if cache_key in self._table_exists_cache:
             return self._table_exists_cache[cache_key]
         exists = self._find_table_name(table_name, schema_name) is not None
-        self._table_exists_cache[cache_key] = exists
+        if exists:
+            self._table_exists_cache[cache_key] = True
         return exists
 
-    def _find_table_name(self, table_name: str, schema_name: str) -> Optional[str]:
-        cache_key = f"{schema_name}.{table_name}"
+    def _find_table_name(self, table_name: str, schema_name: Optional[str] = None) -> Optional[str]:
+        cache_key = table_name.lower()
         if cache_key in self._table_name_lookup_cache:
             return self._table_name_lookup_cache[cache_key]
-        if not self._is_safe_table_name(table_name) or not self._is_safe_table_name(schema_name):
+        if not self._is_safe_table_name(table_name):
             self._table_name_lookup_cache[cache_key] = None
             return None
 
         sql = """
-        SELECT table_name AS table_name
-        FROM information_schema.tables
-        WHERE table_schema = %s
-          AND table_name = %s
+        SELECT name AS table_name
+        FROM sqlite_master
+        WHERE type IN ('table', 'view')
+          AND name = ?
         LIMIT 1
         """
-        df = self.db.query_to_dataframe(sql, (schema_name, table_name))
+        df = self.db.query_to_dataframe(sql, (table_name,))
         if df.empty:
             sql = """
-            SELECT table_name AS table_name
-            FROM information_schema.tables
-            WHERE table_schema = %s
-              AND LOWER(table_name) = LOWER(%s)
-            ORDER BY table_name
+            SELECT name AS table_name
+            FROM sqlite_master
+            WHERE type IN ('table', 'view')
+              AND LOWER(name) = LOWER(?)
+            ORDER BY name
             LIMIT 1
             """
-            df = self.db.query_to_dataframe(sql, (schema_name, table_name))
+            df = self.db.query_to_dataframe(sql, (table_name,))
 
-        actual_name = None if df.empty else str(df.iloc[0]["table_name"])
+        if df.empty:
+            return None
+
+        actual_name = str(df.iloc[0]["table_name"])
         self._table_name_lookup_cache[cache_key] = actual_name
         return actual_name
 
-    def _columns_for_table(self, table_name: str, schema_name: str) -> set:
-        cache_key = f"{schema_name}.{table_name}"
+    def _columns_for_table(self, table_name: str, schema_name: Optional[str] = None) -> set:
+        cache_key = table_name.lower()
         if cache_key in self._columns_cache:
             return self._columns_cache[cache_key]
-        if not self._is_safe_table_name(table_name) or not self._is_safe_table_name(schema_name):
-            self._columns_cache[cache_key] = set()
+        actual_table_name = self._find_table_name(table_name, schema_name)
+        if not actual_table_name or not self._is_safe_table_name(actual_table_name):
             return set()
-        sql = """
-        SELECT column_name AS column_name
-        FROM information_schema.columns
-        WHERE table_schema = %s
-          AND table_name = %s
-        """
-        df = self.db.query_to_dataframe(sql, (schema_name, table_name))
-        columns = {str(column).lower() for column in df["column_name"].tolist()}
+        sql = f"PRAGMA table_info({self._qualified_table(actual_table_name)})"
+        df = self.db.query_to_dataframe(sql)
+        columns = {str(column).lower() for column in df["name"].tolist()}
         self._columns_cache[cache_key] = columns
         return columns
 
-    def _list_code_tables(self, schema_name: str) -> List[str]:
-        if not self._is_safe_table_name(schema_name):
-            return []
+    def _list_code_tables(self, schema_name: Optional[str] = None) -> List[str]:
         sql = """
-        SELECT table_name AS table_name
-        FROM information_schema.tables
-        WHERE table_schema = %s
-          AND table_name REGEXP '^[0-9]{6}_([sS][hH]|[sS][zZ])$'
-        ORDER BY table_name
+        SELECT name AS table_name
+        FROM sqlite_master
+        WHERE type IN ('table', 'view')
+        ORDER BY name
         """
-        df = self.db.query_to_dataframe(sql, (schema_name,))
-        return [str(name) for name in df["table_name"].tolist()]
+        df = self.db.query_to_dataframe(sql)
+        return [
+            str(name)
+            for name in df["table_name"].tolist()
+            if self._code_from_table_name(str(name)) is not None
+        ]
 
-    def _get_latest_name_from_code_table(self, table_name: str, code: str, schema_name: str) -> str:
+    def _get_latest_name_from_code_table(
+        self,
+        table_name: str,
+        code: str,
+        schema_name: Optional[str] = None
+    ) -> str:
         columns = self._columns_for_table(table_name, schema_name)
         name_column = None
         if "name" in columns:
@@ -413,11 +539,12 @@ class MarketDataService:
             return DEFAULT_SECURITY_NAMES.get(code, code)
 
         order_expr = "ORDER BY trade_date DESC" if "trade_date" in columns else ""
+        quoted_name_column = self._quote_identifier(name_column)
         sql = f"""
-        SELECT `{name_column}` AS stock_name
-        FROM {self._qualified_table(schema_name, table_name)}
-        WHERE `{name_column}` IS NOT NULL
-          AND `{name_column}` <> ''
+        SELECT {quoted_name_column} AS stock_name
+        FROM {self._qualified_table(table_name)}
+        WHERE {quoted_name_column} IS NOT NULL
+          AND {quoted_name_column} <> ''
         {order_expr}
         LIMIT 1
         """
@@ -441,41 +568,34 @@ class MarketDataService:
             return []
         return list(dict.fromkeys([table_name, table_name.lower(), table_name.upper()]))
 
-    def _find_code_table(self, stock_code: str) -> Optional[Tuple[str, str]]:
-        for schema_name in self._candidate_schemas_for_code(stock_code):
-            for table_name in self._table_names_for_code(stock_code):
-                actual_table_name = self._find_table_name(table_name, schema_name)
-                if actual_table_name:
-                    return schema_name, actual_table_name
+    def _find_code_table(self, stock_code: str) -> Optional[str]:
+        for table_name in self._table_names_for_code(stock_code):
+            actual_table_name = self._find_table_name(table_name)
+            if actual_table_name:
+                return actual_table_name
         return None
 
     def _candidate_etf_schemas(self) -> List[str]:
-        candidates = [settings.ETF_DB_NAME, settings.DB_NAME, "etf_data"]
-        return [schema for schema in dict.fromkeys(candidates) if schema]
+        return ["main"]
 
     def _find_schema_for_code_table(self, stock_code: str, table_name: Optional[str]) -> Optional[str]:
         if table_name is None:
             return None
-        for schema_name in self._candidate_schemas_for_code(stock_code):
-            if self._find_table_name(table_name, schema_name):
-                return schema_name
-        return None
+        return "main" if self._find_table_name(table_name) else None
 
     def _candidate_schemas_for_code(self, stock_code: str) -> List[str]:
-        base = normalize_stock_code(stock_code).split(".")[0]
-        if base.startswith("000"):
-            candidates = [settings.INDEX_DB_NAME, settings.DB_NAME, settings.ETF_DB_NAME, "stock_data"]
-        else:
-            candidates = [settings.ETF_DB_NAME, settings.DB_NAME, "etf_data"]
-        return [schema for schema in dict.fromkeys(candidates) if schema]
+        return ["main"]
 
     def _is_safe_table_name(self, table_name: str) -> bool:
         return bool(re.fullmatch(r"[A-Za-z0-9_]+", table_name))
 
-    def _qualified_table(self, schema_name: str, table_name: str) -> str:
-        if not self._is_safe_table_name(schema_name) or not self._is_safe_table_name(table_name):
+    def _quote_identifier(self, identifier: str) -> str:
+        if not self._is_safe_table_name(identifier):
             raise ValueError("Unsafe database or table name")
-        return f"`{schema_name}`.`{table_name}`"
+        return f'"{identifier}"'
+
+    def _qualified_table(self, table_name: str, schema_name: Optional[str] = None) -> str:
+        return self._quote_identifier(table_name)
 
     def _code_from_table_name(self, table_name: str) -> Optional[str]:
         match = re.fullmatch(r"([0-9]{6})_([sS][hH]|[sS][zZ])", table_name)
@@ -486,7 +606,7 @@ class MarketDataService:
 
     def _looks_like_etf(self, stock_code: str) -> bool:
         base = stock_code.split(".")[0]
-        return base.startswith(("50", "51", "56", "58", "15", "16", "18"))
+        return base.startswith(("50", "51", "52", "53", "56", "58", "15", "16", "18"))
 
 
 market_data_service = MarketDataService()

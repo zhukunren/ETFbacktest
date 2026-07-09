@@ -4,12 +4,12 @@
 
 ## 功能特性
 
-- ETF列表查询（优先从Tushare获取当前上市ETF，失败时读取 `data/ETF列表.xlsx`）
+- ETF列表查询（优先读取SQLite，缺失时从AkShare获取，失败时读取 `data/ETF列表.xlsx`）
 - 自定义权重配置
 - 多种再均衡频率（不再平衡、月初/末、周初/末）
 - 自定义回测周期
 - 买入/卖出交易费率，默认各万分之三
-- 000001.SH基准净值对比
+- 自定义加权基准净值对比
 - ETF无行情期间使用现金替代，并在回测结果中提示
 - 完整的回测指标计算
 
@@ -17,7 +17,7 @@
 
 - FastAPI - Web框架
 - pandas + numpy - 数据处理
-- PyMySQL - MySQL数据库连接
+- SQLite - 本地行情数据库
 - pydantic - 数据验证
 
 ## 安装
@@ -29,21 +29,14 @@ pip install -r requirements.txt
 
 ## 配置
 
-复制 `.env.example` 为 `.env` 并配置数据库连接：
+复制 `.env.example` 为 `.env` 并配置SQLite数据库路径：
 
 ```ini
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=etf_data
-ETF_DB_NAME=etf_data
-INDEX_DB_NAME=stock_data
-MYSQL_USER=root
-MYSQL_PASSWORD=your_password
-TUSHARE_TOKEN=your_tushare_token
+SQLITE_DB_PATH=data/market_data.sqlite3
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-后端实际读取状态可访问 `GET /api/config/status`，该接口只返回数据库、密码和token等配置是否存在，不返回数据库地址、用户名、密码或token明文。
+后端实际读取状态可访问 `GET /api/config/status`，该接口只返回SQLite数据库路径、文件是否存在等非敏感配置状态。
 
 ## 运行
 
@@ -86,10 +79,12 @@ POST /api/backtest/run
   "start_date": "2015-01-01",
   "end_date": "2026-07-04",
   "rebalance_freq": "month_start",
-  "initial_capital": 100000.0,
   "buy_fee_rate": 0.0003,
   "sell_fee_rate": 0.0003,
-  "benchmark_code": "000001.SH"
+  "benchmark_list": [
+    {"stock_code": "000001.SH", "weight": 0.5},
+    {"stock_code": "000300.SH", "weight": 0.5}
+  ]
 }
 ```
 
@@ -102,7 +97,11 @@ POST /api/backtest/run
 
 ### 数据库结构
 
-支持 `stock_daily_price` 单表，也支持 `510300_SH` 这类按代码分表。分表名大小写均可识别。单表字段至少包含 `stock_code`、`trade_date`、`close`，`stock_name` 和 `adj_factor` 可选；分表字段至少包含 `trade_date`、`close`，`name/stock_name` 和 `adj_factor` 可选。
+SQLite数据库支持 `stock_daily_price` 单表、`tools/updata_data.py` 生成的 `etf_daily_price` 表，也支持 `510300_SH` 这类按代码分表。分表名大小写均可识别。`stock_daily_price` 至少包含 `stock_code`、`trade_date`、`close`；`etf_daily_price` 至少包含 `ts_code/stock_code`、`trade_date`、`close`；分表至少包含 `trade_date`、`close`。`stock_name/name` 和 `adj_factor` 可选。
+
+### 定时数据更新
+
+`tools/scheduled_update.py` 用于定时任务包装 `tools/updata_data.py`，提供进程锁、整轮失败重试和日志。systemd配置位于 `deploy/systemd/`，默认每天21:00运行，日志写入 `logs/data_update.log`。
 
 ## 项目结构
 

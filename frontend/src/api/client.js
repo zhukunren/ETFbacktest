@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
@@ -25,7 +25,7 @@ apiClient.interceptors.response.use(
   },
   error => {
     const message = error.response?.data?.detail ||
-      (error.request ? '无法连接后端服务，请确认 http://127.0.0.1:8000 已启动，且MySQL环境变量配置正确' : error.message) ||
+      (error.request ? '无法连接后端服务，请确认后端已启动，且前端 API 代理配置正确' : error.message) ||
       '请求失败'
     return Promise.reject(new Error(message))
   }

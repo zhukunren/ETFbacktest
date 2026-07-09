@@ -31,6 +31,17 @@ async def run_backtest(request: BacktestRequest):
                 detail=f"权重总和必须为1，当前为 {total_weight:.4f}"
             )
 
+        benchmark_codes = [item.stock_code for item in request.benchmark_list]
+        if len(set(benchmark_codes)) != len(benchmark_codes):
+            raise HTTPException(status_code=400, detail="基准代码不能重复")
+
+        benchmark_total_weight = sum(item.weight for item in request.benchmark_list)
+        if abs(benchmark_total_weight - 1.0) > 0.0001:
+            raise HTTPException(
+                status_code=400,
+                detail=f"基准权重总和必须为1，当前为 {benchmark_total_weight:.4f}"
+            )
+
         # 执行回测
         result = await run_in_threadpool(rebalance_engine.run_backtest, request)
         return result
@@ -52,14 +63,10 @@ async def health_check():
 @router.get("/config/status")
 async def config_status():
     """返回非敏感配置状态，便于排查环境变量。"""
+    sqlite_db_path = settings.sqlite_db_path()
     return {
-        "db_host_set": bool(settings.DB_HOST),
-        "db_port": settings.DB_PORT,
-        "db_name_set": bool(settings.DB_NAME),
-        "etf_db_name_set": bool(settings.ETF_DB_NAME),
-        "index_db_name_set": bool(settings.INDEX_DB_NAME),
-        "db_user_set": bool(settings.DB_USER),
-        "mysql_password_set": bool(settings.DB_PASSWORD),
-        "tushare_token_set": bool(settings.effective_tushare_token()),
+        "database": "sqlite",
+        "sqlite_db_path": str(sqlite_db_path),
+        "sqlite_db_exists": sqlite_db_path.exists(),
         "cors_origins": settings.cors_origins(),
     }
