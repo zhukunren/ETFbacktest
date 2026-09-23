@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="基于 AkShare 行情的 ETF 组合回测工具" />
+    <title>ETF Lab | 回测工作台</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="ETF Lab 回测工作台">
+          <span class="brand-mark" aria-hidden="true"><i data-lucide="chart-no-axes-combined"></i></span>
+          <span>
+            <strong>ETF Lab</strong>
+            <small>回测工作台</small>
+          </span>
+        </a>
+        <div class="source-tools">
+          <span class="source-state" id="sourceState"><span class="status-dot"></span>正在读取本地目录</span>
+          <button class="icon-button" id="refreshCatalog" type="button" aria-label="刷新 ETF 目录" data-tooltip="从 AkShare 刷新 ETF 目录">
+            <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="configuration" aria-label="回测参数">
+          <div class="panel-title-row">
+            <div>
+              <p class="eyebrow">组合配置</p>
+              <h1>构建投资组合</h1>
+            </div>
+            <span class="catalog-count" id="catalogCount">-- 只</span>
+          </div>
+
+          <section class="control-section fund-search-section" aria-labelledby="fundSearchHeading">
+            <div class="section-label-row">
+              <h2 id="fundSearchHeading">基金池</h2>
+              <button class="text-button" id="equalizeWeights" type="button"><i data-lucide="scale" aria-hidden="true"></i>均分权重</button>
+            </div>
+            <div class="search-control">
+              <i data-lucide="search" aria-hidden="true"></i>
+              <input id="fundSearch" type="search" autocomplete="off" placeholder="输入 ETF 名称或代码" aria-label="搜索 ETF 名称或代码" />
+              <button class="search-clear icon-button" id="clearSearch" type="button" aria-label="清空搜索" data-tooltip="清空搜索" hidden>
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="search-results" id="searchResults" role="listbox" aria-label="ETF 搜索结果" hidden></div>
+            </div>
+            <div class="selected-funds" id="selectedFunds" aria-live="polite"></div>
+            <div class="weight-footer">
+              <span>目标权重</span>
+              <strong id="weightTotal">0.00%</strong>
+            </div>
+          </section>
+
+          <section class="control-section" aria-labelledby="strategyHeading">
+            <h2 id="strategyHeading">策略类型</h2>
+            <div class="segmented-control" role="tablist" aria-label="策略类型">
+              <button class="segment is-active" id="rebalanceTab" type="button" role="tab" aria-selected="true" aria-controls="rebalanceSettings">定期再平衡</button>
+              <button class="segment" id="dcaTab" type="button" role="tab" aria-selected="false" aria-controls="dcaSettings">定投计划</button>
+            </div>
+          </section>
+
+          <section class="control-section" aria-labelledby="timeHeading">
+            <h2 id="timeHeading">回测区间</h2>
+            <div class="field-grid two-columns">
+              <label class="field">
+                <span>开始日期</span>
+                <input id="startDate" type="date" />
+              </label>
+              <label class="field">
+                <span>结束日期</span>
+                <input id="endDate" type="date" />
+              </label>
+            </div>
+          </section>
+
+          <section class="control-section" aria-labelledby="capitalHeading">
+            <h2 id="capitalHeading">资金与成本</h2>
+            <div class="field-grid two-columns">
+              <label class="field">
+                <span>初始资金（元）</span>
+                <input id="initialCapital" type="number" min="0" step="1000" value="100000" inputmode="decimal" />
+              </label>
+              <label class="field">
+                <span>单边费率（%）</span>
+                <input id="feeRate" type="number" min="0" max="3" step="0.001" value="0.03" inputmode="decimal" />
+              </label>
+            </div>
+          </section>
+
+          <section class="strategy-settings" id="rebalanceSettings" role="tabpanel" aria-labelledby="rebalanceTab">
+            <div class="control-section no-bottom-border">
+              <h2>再平衡频率</h2>
+              <div class="choice-grid three-columns" id="rebalanceFrequency" role="radiogroup" aria-label="再平衡频率">
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="weekly" /><span>周初</span></label>
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="weekly_end" /><span>周末</span></label>
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="monthly" checked /><span>月初</span></label>
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="monthly_end" /><span>月末</span></label>
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="quarterly" /><span>季初</span></label>
+                <label class="choice"><input type="radio" name="rebalanceFreq" value="quarterly_end" /><span>季末</span></label>
+              </div>
+            </div>
+          </section>
+
+          <section class="strategy-settings" id="dcaSettings" role="tabpanel" aria-labelledby="dcaTab" hidden>
+            <div class="control-section">
+              <h2>定投规则</h2>
+              <div class="field-grid two-columns dca-frequency-grid">
+                <label class="field">
+                  <span>定投频率</span>
+                  <select id="dcaFrequency">
+                    <option value="weekly">周初</option>
+                    <option value="weekly_end">周末</option>
+                    <option value="monthly" selected>月初</option>
+                    <option value="monthly_end">月末</option>
+                    <option value="quarterly">季初</option>
+                    <option value="quarterly_end">季末</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>投入方式</span>
+                  <select id="dcaMode">
+                    <option value="amount" selected>固定金额</option>
+                    <option value="shares">固定份额</option>
+                  </select>
+                </label>
+                <label class="field wide-field">
+                  <span id="dcaValueLabel">每期金额（元）</span>
+                  <input id="dcaValue" type="number" min="0.01" step="100" value="2000" inputmode="decimal" />
+                </label>
+              </div>
+            </div>
+            <div class="control-section no-bottom-border">
+              <h2>定投后再平衡</h2>
+              <div class="choice-grid three-columns" id="dcaRebalanceFrequency" role="radiogroup" aria-label="定投后再平衡频率">
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="none" checked /><span>不调整</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="weekly" /><span>周初</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="weekly_end" /><span>周末</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="monthly" /><span>月初</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="monthly_end" /><span>月末</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="quarterly" /><span>季初</span></label>
+                <label class="choice"><input type="radio" name="dcaRebalanceFreq" value="quarterly_end" /><span>季末</span></label>
+              </div>
+            </div>
+          </section>
+
+          <div class="run-area">
+            <p class="calculation-note"><i data-lucide="circle-info" aria-hidden="true"></i>基于 AkShare 日收盘价计算，手续费已计入交易</p>
+            <button class="run-button" id="runBacktest" type="button"><i data-lucide="play" aria-hidden="true"></i><span>运行回测</span></button>
+          </div>
+        </aside>
+
+        <section class="results" aria-label="回测结果">
+          <div class="results-header">
+            <div>
+              <p class="eyebrow">回测结果</p>
+              <h2 id="resultTitle">等待运行</h2>
+            </div>
+            <span class="result-meta" id="resultMeta">--</span>
+          </div>
+
+          <div class="empty-state" id="emptyState">
+            <div class="empty-mark" aria-hidden="true"><i data-lucide="line-chart"></i></div>
+            <h2>组合净值将在这里展开</h2>
+            <p>配置基金、权重和策略后运行回测。</p>
+          </div>
+
+          <div id="resultContent" hidden>
+            <div class="metric-grid" aria-label="核心指标">
+              <article class="metric-card"><span>期末资产</span><strong id="metricFinalValue">--</strong><small id="metricProfit">--</small></article>
+              <article class="metric-card"><span>资金收益率</span><strong id="metricCapitalReturn">--</strong><small id="metricInvested">--</small></article>
+              <article class="metric-card"><span>年化收益率</span><strong id="metricAnnualized">--</strong><small>时间加权</small></article>
+              <article class="metric-card"><span>最大回撤</span><strong id="metricDrawdown">--</strong><small id="metricVolatility">--</small></article>
+            </div>
+
+            <section class="chart-section" aria-labelledby="navHeading">
+              <div class="section-heading">
+                <div>
+                  <h3 id="navHeading">组合净值</h3>
+                  <p>资产市值与累计投入</p>
+                </div>
+                <div class="chart-legend" aria-label="图例">
+                  <span><i class="legend-swatch nav-swatch"></i>组合资产</span>
+                  <span><i class="legend-swatch invested-swatch"></i>累计投入</span>
+                </div>
+              </div>
+              <div class="nav-chart" id="navChart" role="img" aria-label="组合资产与累计投入走势"></div>
+            </section>
+
+            <section class="chart-section" aria-labelledby="fundNavHeading">
+              <div class="section-heading">
+                <div>
+                  <h3 id="fundNavHeading">基金净值</h3>
+                  <p id="fundNavCaption">相对净值，首个共同交易日 = 1.0000</p>
+                </div>
+              </div>
+              <div class="fund-nav-chart" id="fundNavChart" role="img" aria-label="各基金相对净值走势"></div>
+            </section>
+
+            <div class="result-grid">
+              <section class="data-section" aria-labelledby="allocationHeading">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <h3 id="allocationHeading">期末持仓</h3>
+                    <p>按最后一个交易日收盘价估值</p>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>基金</th><th class="numeric">目标</th><th class="numeric">实际</th><th class="numeric">相对净值</th><th class="numeric">区间</th><th class="numeric">市值</th></tr></thead>
+                    <tbody id="allocationBody"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="data-section" aria-labelledby="executionHeading">
+                <div class="section-heading compact-heading">
+                  <div>
+                    <h3 id="executionHeading">执行摘要</h3>
+                    <p id="executionSummary">--</p>
+                  </div>
+                  <span class="fee-chip" id="totalFees">手续费 --</span>
+                </div>
+                <div class="execution-lines" id="executionLines"></div>
+              </section>
+            </div>
+
+            <section class="data-section trades-section" aria-labelledby="tradesHeading">
+              <div class="section-heading compact-heading">
+                <div>
+                  <h3 id="tradesHeading">交易流水</h3>
+                  <p id="tradesCaption">--</p>
+                </div>
+              </div>
+              <div class="table-wrap trade-table-wrap">
+                <table>
+                  <thead><tr><th>日期</th><th>基金</th><th>方向</th><th class="numeric">份额</th><th class="numeric">成交价</th><th class="numeric">金额</th><th class="numeric">手续费</th><th>原因</th></tr></thead>
+                  <tbody id="tradesBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
