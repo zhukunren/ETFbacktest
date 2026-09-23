@@ -4,30 +4,57 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="基于 AkShare 行情的 ETF 组合回测工具" />
-    <title>ETF Lab | 回测工作台</title>
+    <title>ETF Lab | 东吴证券组合研究工作台</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <header class="topbar">
-        <a class="brand" href="/" aria-label="ETF Lab 回测工作台">
-          <span class="brand-mark" aria-hidden="true"><i data-lucide="chart-no-axes-combined"></i></span>
-          <span>
-            <strong>ETF Lab</strong>
-            <small>回测工作台</small>
-          </span>
+      <aside class="sidebar" aria-label="研究工作台导航">
+        <a class="dongwu-brand" href="/" aria-label="东吴证券 ETF 组合研究工作台">
+          <img src="/static/dongwu-logo.png" alt="东吴证券" />
+          <span>ETF 组合研究工作台</span>
         </a>
-        <div class="source-tools">
-          <span class="source-state" id="sourceState"><span class="status-dot"></span>正在读取本地目录</span>
-          <button class="icon-button" id="refreshCatalog" type="button" aria-label="刷新 ETF 目录" data-tooltip="从 AkShare 刷新 ETF 目录">
-            <i data-lucide="refresh-cw" aria-hidden="true"></i>
-          </button>
+        <div class="sidebar-label">研究工作台</div>
+        <nav class="main-nav" aria-label="工作台区域">
+          <a class="nav-item is-active" href="#configurationPanel"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>组合配置</span><b>01</b></a>
+          <a class="nav-item" href="#resultContent"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>回测结果</span><b>02</b></a>
+          <a class="nav-item" href="#tradesHeading"><i data-lucide="list-tree" aria-hidden="true"></i><span>交易流水</span><b>03</b></a>
+        </nav>
+        <div class="sidebar-rule"></div>
+        <div class="sidebar-label">行情数据</div>
+        <div class="source-card">
+          <span class="source-card-icon"><i data-lucide="database" aria-hidden="true"></i></span>
+          <div><strong>AkShare 行情</strong><span>日收盘价 · 本地缓存</span></div>
+          <span class="source-pulse" aria-hidden="true"></span>
         </div>
-      </header>
+        <div class="sidebar-footer"><span>东吴证券 · ETF LAB</span><small>研究结果仅供回测参考</small></div>
+      </aside>
 
-      <main class="workspace">
-        <aside class="configuration" aria-label="回测参数">
+      <div class="main-content">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>研究工作台</span><i data-lucide="chevron-right" aria-hidden="true"></i><strong>组合回测</strong></div>
+          <div class="topbar-actions">
+            <span class="source-state" id="sourceState"><span class="status-dot"></span>正在读取本地目录</span>
+            <button class="icon-button" id="refreshCatalog" type="button" aria-label="刷新 ETF 目录" data-tooltip="从 AkShare 刷新 ETF 目录">
+              <i data-lucide="refresh-cw" aria-hidden="true"></i>
+            </button>
+            <span class="topbar-divider" aria-hidden="true"></span>
+            <span class="topbar-date">DAILY / ETF</span>
+          </div>
+        </header>
+
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow"><span class="eyebrow-line"></span>DONGWU SECURITIES / ETF LAB</p>
+            <h1>把一个想法，变成一段可复盘的组合历史</h1>
+            <p class="heading-copy">选择 ETF、设定权重与执行节奏，观察资产路径、风险和每一次交易。</p>
+          </div>
+          <div class="heading-stamp"><span>行情状态</span><strong><i class="status-dot"></i>本地目录可用</strong><small>数据由 AkShare 提供</small></div>
+        </section>
+
+        <main class="workspace">
+        <aside class="configuration" id="configurationPanel" aria-label="回测参数">
           <div class="panel-title-row">
             <div>
               <p class="eyebrow">组合配置</p>
@@ -245,7 +272,9 @@
             </section>
           </div>
         </section>
-      </main>
+        </main>
+        <footer class="app-footer"><span>东吴证券 · ETF 组合研究工作台</span><span>本地运行 · 数据仅用于研究与回测</span></footer>
+      </div>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>

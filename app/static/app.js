@@ -59,7 +59,7 @@
     maximumFractionDigits: 2,
   });
   const number = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
-  const fundNavColors = ["#087c70", "#b77616", "#2d8f68", "#c2463c", "#176f9b", "#7a5c9e"];
+  const fundNavColors = ["#0079c2", "#8c91a2", "#6ebb79", "#f24040", "#034888", "#faa245"];
   const percentage = (value, digits = 2) => `${(Number(value || 0) * 100).toFixed(digits)}%`;
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -294,7 +294,7 @@
       grid: { left: 60, right: 22, top: 15, bottom: 48 },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(25, 39, 34, 0.96)",
+        backgroundColor: "rgba(3, 37, 89, 0.96)",
         borderWidth: 0,
         textStyle: { color: "#fff", fontSize: 12 },
         valueFormatter: (value) => money.format(value),
@@ -303,17 +303,17 @@
         type: "category",
         boundaryGap: false,
         data: series.dates,
-        axisLine: { lineStyle: { color: "#bdcbc4" } },
+        axisLine: { lineStyle: { color: "#cbd6e0" } },
         axisTick: { show: false },
-        axisLabel: { color: "#68746f", fontSize: 11, hideOverlap: true, margin: 13 },
+        axisLabel: { color: "#6f8190", fontSize: 11, hideOverlap: true, margin: 13 },
       },
       yAxis: {
         type: "value",
         scale: true,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: "#e1e8e4" } },
-        axisLabel: { color: "#68746f", fontSize: 11, formatter: (value) => number.format(value) },
+        splitLine: { lineStyle: { color: "#e5ebf2" } },
+        axisLabel: { color: "#6f8190", fontSize: 11, formatter: (value) => number.format(value) },
       },
       dataZoom: [{ type: "inside", start: 0, end: 100 }],
       series: [
@@ -323,8 +323,8 @@
           data: series.nav,
           showSymbol: false,
           smooth: false,
-          lineStyle: { width: 2, color: "#087c70" },
-          itemStyle: { color: "#087c70" },
+          lineStyle: { width: 2, color: "#0079c2" },
+          itemStyle: { color: "#0079c2" },
         },
         {
           name: "累计投入",
@@ -332,8 +332,8 @@
           data: series.invested,
           showSymbol: false,
           smooth: false,
-          lineStyle: { width: 2, color: "#b77616", type: "dashed" },
-          itemStyle: { color: "#b77616" },
+          lineStyle: { width: 2, color: "#8c91a2", type: "dashed" },
+          itemStyle: { color: "#8c91a2" },
         },
       ],
     });
@@ -356,11 +356,11 @@
         left: 0,
         right: 0,
         data: labels,
-        textStyle: { color: "#68746f", fontSize: 12 },
+        textStyle: { color: "#6f8190", fontSize: 12 },
       },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(25, 39, 34, 0.96)",
+        backgroundColor: "rgba(3, 37, 89, 0.96)",
         borderWidth: 0,
         textStyle: { color: "#fff", fontSize: 12 },
         valueFormatter: (value) => Number(value).toFixed(4),
@@ -369,17 +369,17 @@
         type: "category",
         boundaryGap: false,
         data: dates,
-        axisLine: { lineStyle: { color: "#bdcbc4" } },
+        axisLine: { lineStyle: { color: "#cbd6e0" } },
         axisTick: { show: false },
-        axisLabel: { color: "#68746f", fontSize: 11, hideOverlap: true, margin: 13 },
+        axisLabel: { color: "#6f8190", fontSize: 11, hideOverlap: true, margin: 13 },
       },
       yAxis: {
         type: "value",
         scale: true,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: "#e1e8e4" } },
-        axisLabel: { color: "#68746f", fontSize: 11, formatter: (value) => Number(value).toFixed(2) },
+        splitLine: { lineStyle: { color: "#e5ebf2" } },
+        axisLabel: { color: "#6f8190", fontSize: 11, formatter: (value) => Number(value).toFixed(2) },
       },
       dataZoom: [{ type: "inside", start: 0, end: 100 }],
       series: fundNav.items.map((item, index) => ({
