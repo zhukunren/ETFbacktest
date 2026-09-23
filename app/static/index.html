@@ -3,69 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="基于 AkShare 行情的 ETF 组合回测工具" />
-    <title>ETF Lab | 东吴证券组合研究工作台</title>
+    <meta name="description" content="东吴证券 ETF 组合回测工作台，探索资产配置与策略表现" />
+    <title>东吴证券 · ETF 策略研究</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="研究工作台导航">
-        <a class="dongwu-brand" href="/" aria-label="东吴证券 ETF 组合研究工作台">
-          <img src="/static/dongwu-logo.png" alt="东吴证券" />
-          <span>ETF 组合研究工作台</span>
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="东吴证券 ETF 策略研究">
+          <img class="brand-logo" src="/static/soochow-logo.png" width="320" height="70" alt="东吴证券 SOOCHOW SECURITIES" />
         </a>
-        <div class="sidebar-label">研究工作台</div>
-        <nav class="main-nav" aria-label="工作台区域">
-          <a class="nav-item is-active" href="#configurationPanel"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>组合配置</span><b>01</b></a>
-          <a class="nav-item" href="#resultContent"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>回测结果</span><b>02</b></a>
-          <a class="nav-item" href="#tradesHeading"><i data-lucide="list-tree" aria-hidden="true"></i><span>交易流水</span><b>03</b></a>
-        </nav>
-        <div class="sidebar-rule"></div>
-        <div class="sidebar-label">行情数据</div>
-        <div class="source-card">
-          <span class="source-card-icon"><i data-lucide="database" aria-hidden="true"></i></span>
-          <div><strong>AkShare 行情</strong><span>日收盘价 · 本地缓存</span></div>
-          <span class="source-pulse" aria-hidden="true"></span>
+        <div class="product-name">量化研究</div>
+        <div class="header-breadcrumb"><span>研究中心</span><i>/</i><span>ETF 组合回测</span></div>
+        <div class="source-tools">
+          <span class="source-state" id="sourceState"><span class="status-dot"></span>正在读取本地目录</span>
+          <button class="icon-button" id="refreshCatalog" type="button" aria-label="刷新 ETF 目录" data-tooltip="从 AkShare 刷新 ETF 目录">
+            <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          </button>
         </div>
-        <div class="sidebar-footer"><span>东吴证券 · ETF LAB</span><small>研究结果仅供回测参考</small></div>
-      </aside>
-
-      <div class="main-content">
-        <header class="topbar">
-          <div class="breadcrumbs"><span>研究工作台</span><i data-lucide="chevron-right" aria-hidden="true"></i><strong>组合回测</strong></div>
-          <div class="topbar-actions">
-            <span class="source-state" id="sourceState"><span class="status-dot"></span>正在读取本地目录</span>
-            <button class="icon-button" id="refreshCatalog" type="button" aria-label="刷新 ETF 目录" data-tooltip="从 AkShare 刷新 ETF 目录">
-              <i data-lucide="refresh-cw" aria-hidden="true"></i>
-            </button>
-            <span class="topbar-divider" aria-hidden="true"></span>
-            <span class="topbar-date">DAILY / ETF</span>
-          </div>
-        </header>
-
-        <section class="page-heading">
-          <div>
-            <p class="eyebrow"><span class="eyebrow-line"></span>DONGWU SECURITIES / ETF LAB</p>
-            <h1>把一个想法，变成一段可复盘的组合历史</h1>
-            <p class="heading-copy">选择 ETF、设定权重与执行节奏，观察资产路径、风险和每一次交易。</p>
-          </div>
-          <div class="heading-stamp"><span>行情状态</span><strong><i class="status-dot"></i>本地目录可用</strong><small>数据由 AkShare 提供</small></div>
-        </section>
-
-        <main class="workspace">
-        <aside class="configuration" id="configurationPanel" aria-label="回测参数">
+      </header>
+      <div class="repository-navigation">
+        <nav class="workspace-switch" aria-label="工作台导航">
+          <a href="#workspaceTop" class="workspace-link is-active" aria-current="location"><i data-lucide="library-big" aria-hidden="true"></i><span>ETF 回测</span></a>
+          <a href="#configuration" class="workspace-link"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>组合配置</span></a>
+          <a href="#results" class="workspace-link"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>策略分析</span></a>
+        </nav>
+        <span class="navigation-note"><i></i>QUANTITATIVE RESEARCH</span>
+      </div>
+      <div class="page-content" id="workspaceTop">
+      <div class="page-heading">
+        <div><p class="page-kicker"><span></span>ETF PORTFOLIO RESEARCH</p><h1>ETF 组合回测<span class="title-mark">.</span></h1><p>构建多资产组合，通过历史回测评估配置收益、风险与再平衡效果。</p></div>
+        <div class="heading-note"><i data-lucide="layers" aria-hidden="true"></i><span>组合配置 / 策略验证<small>定期再平衡 · 定投计划</small></span></div>
+      </div>
+      <main class="workspace">
+        <aside class="configuration" id="configuration" aria-label="回测参数">
           <div class="panel-title-row">
             <div>
-              <p class="eyebrow">组合配置</p>
-              <h1>构建投资组合</h1>
+              <h2><span class="section-marker"></span>组合配置</h2>
+              <p class="panel-caption">选择基金，设定投资规则</p>
             </div>
             <span class="catalog-count" id="catalogCount">-- 只</span>
           </div>
 
           <section class="control-section fund-search-section" aria-labelledby="fundSearchHeading">
             <div class="section-label-row">
-              <h2 id="fundSearchHeading">基金池</h2>
+              <h2 id="fundSearchHeading"><span class="step-number">01</span>选择基金</h2>
               <button class="text-button" id="equalizeWeights" type="button"><i data-lucide="scale" aria-hidden="true"></i>均分权重</button>
             </div>
             <div class="search-control">
@@ -78,13 +61,14 @@
             </div>
             <div class="selected-funds" id="selectedFunds" aria-live="polite"></div>
             <div class="weight-footer">
-              <span>目标权重</span>
+              <span>权重合计 <span id="holdingCount">2 只基金</span></span>
               <strong id="weightTotal">0.00%</strong>
             </div>
+            <div class="weight-bar" id="weightBar" aria-hidden="true"></div>
           </section>
 
           <section class="control-section" aria-labelledby="strategyHeading">
-            <h2 id="strategyHeading">策略类型</h2>
+            <h2 id="strategyHeading"><span class="step-number">02</span>设置策略</h2>
             <div class="segmented-control" role="tablist" aria-label="策略类型">
               <button class="segment is-active" id="rebalanceTab" type="button" role="tab" aria-selected="true" aria-controls="rebalanceSettings">定期再平衡</button>
               <button class="segment" id="dcaTab" type="button" role="tab" aria-selected="false" aria-controls="dcaSettings">定投计划</button>
@@ -92,7 +76,7 @@
           </section>
 
           <section class="control-section" aria-labelledby="timeHeading">
-            <h2 id="timeHeading">回测区间</h2>
+            <div class="section-label-row"><h2 id="timeHeading">回测区间</h2><div class="date-presets" aria-label="快捷回测区间"><button type="button" data-years="1">近1年</button><button type="button" data-years="3" class="is-active" aria-pressed="true">近3年</button><button type="button" data-years="5">近5年</button></div></div>
             <div class="field-grid two-columns">
               <label class="field">
                 <span>开始日期</span>
@@ -176,24 +160,32 @@
           </section>
 
           <div class="run-area">
-            <p class="calculation-note"><i data-lucide="circle-info" aria-hidden="true"></i>基于 AkShare 日收盘价计算，手续费已计入交易</p>
-            <button class="run-button" id="runBacktest" type="button"><i data-lucide="play" aria-hidden="true"></i><span>运行回测</span></button>
+            <button class="run-button" id="runBacktest" type="button"><i data-lucide="play" aria-hidden="true"></i><span>运行回测</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+            <p class="calculation-note"><i data-lucide="info" aria-hidden="true"></i>日收盘价测算 · 已计入交易手续费</p>
           </div>
         </aside>
 
-        <section class="results" aria-label="回测结果">
+        <section class="results" id="results" aria-label="回测结果">
           <div class="results-header">
             <div>
-              <p class="eyebrow">回测结果</p>
-              <h2 id="resultTitle">等待运行</h2>
+              <p class="eyebrow">PERFORMANCE / 回测分析</p>
+              <h2 id="resultTitle">策略表现概览</h2>
             </div>
-            <span class="result-meta" id="resultMeta">--</span>
+            <span class="result-meta" id="resultMeta">尚未运行回测</span>
           </div>
 
           <div class="empty-state" id="emptyState">
-            <div class="empty-mark" aria-hidden="true"><i data-lucide="line-chart"></i></div>
-            <h2>组合净值将在这里展开</h2>
-            <p>配置基金、权重和策略后运行回测。</p>
+            <div class="metric-grid placeholder-metrics" aria-label="待计算的核心指标"><article class="metric-card"><span>期末资产 <i data-lucide="wallet"></i></span><strong>—</strong><small>组合最终资产市值</small></article><article class="metric-card"><span>资金收益率 <i data-lucide="trending-up"></i></span><strong>—</strong><small>收益 / 累计投入</small></article><article class="metric-card"><span>年化收益率 <i data-lucide="chart-no-axes-column-increasing"></i></span><strong>—</strong><small>时间加权收益</small></article><article class="metric-card"><span>最大回撤 <i data-lucide="activity"></i></span><strong>—</strong><small>衡量策略下行风险</small></article></div>
+            <div class="empty-chart-panel">
+              <div class="section-heading"><div><h3>组合资产走势</h3><p>观察长期表现，理解收益与风险</p></div><span class="subtle-chip">等待回测</span></div>
+              <div class="empty-chart-content">
+                <div class="empty-illustration" aria-hidden="true"><div class="illustration-bars"><b></b><b></b><b></b><b></b><b></b></div><span><i data-lucide="chart-no-axes-combined"></i></span></div>
+                <h2>等待首次回测</h2><p>完成组合配置并运行回测，即可查看资产走势与风险收益指标。</p>
+                <a href="#configuration" class="empty-action">完善左侧配置，运行首次回测 <i data-lucide="arrow-up-left"></i></a>
+              </div>
+              <div class="empty-chart-footer"><span><i class="legend-swatch nav-swatch"></i>组合资产</span><span><i class="legend-swatch invested-swatch"></i>累计投入</span><span>回测完成后展示实际数据</span></div>
+            </div>
+            <div class="research-guide"><div class="guide-heading"><span class="eyebrow">RESEARCH WORKFLOW</span><h3>让策略研究更有条理</h3></div><div><span class="guide-number">01</span><h4>构建组合</h4><p>选择不同资产，设定目标权重</p></div><div><span class="guide-number">02</span><h4>设定规则</h4><p>确定投入方式与再平衡周期</p></div><div><span class="guide-number">03</span><h4>评估表现</h4><p>结合收益、回撤与交易复盘</p></div></div>
           </div>
 
           <div id="resultContent" hidden>
@@ -207,7 +199,7 @@
             <section class="chart-section" aria-labelledby="navHeading">
               <div class="section-heading">
                 <div>
-                  <h3 id="navHeading">组合净值</h3>
+                  <h3 id="navHeading">组合资产走势</h3>
                   <p>资产市值与累计投入</p>
                 </div>
                 <div class="chart-legend" aria-label="图例">
@@ -272,8 +264,8 @@
             </section>
           </div>
         </section>
-        </main>
-        <footer class="app-footer"><span>东吴证券 · ETF 组合研究工作台</span><span>本地运行 · 数据仅用于研究与回测</span></footer>
+      </main>
+      <footer class="page-footer"><span>东吴证券 <b>·</b> 量化策略研究</span><span>历史回测仅供研究参考，不代表未来表现。</span></footer>
       </div>
     </div>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>

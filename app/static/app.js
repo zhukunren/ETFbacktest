@@ -13,6 +13,7 @@
 
   const $ = (selector) => document.querySelector(selector);
   const dom = {
+    results: $("#results"),
     sourceState: $("#sourceState"),
     catalogCount: $("#catalogCount"),
     refreshCatalog: $("#refreshCatalog"),
@@ -59,7 +60,7 @@
     maximumFractionDigits: 2,
   });
   const number = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 });
-  const fundNavColors = ["#0079c2", "#8c91a2", "#6ebb79", "#f24040", "#034888", "#faa245"];
+  const fundNavColors = ["#32839b", "#8c9caf", "#208575", "#377fae", "#be414a", "#92769c"];
   const percentage = (value, digits = 2) => `${(Number(value || 0) * 100).toFixed(digits)}%`;
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -74,12 +75,17 @@
     return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 10);
   }
 
-  function setupDates() {
+  function setupDates(years = 3) {
     const today = new Date();
     const start = new Date(today);
-    start.setFullYear(start.getFullYear() - 3);
+    start.setFullYear(start.getFullYear() - years);
     dom.startDate.value = isoDate(start);
     dom.endDate.value = isoDate(today);
+    document.querySelectorAll("[data-years]").forEach((button) => {
+      const active = Number(button.dataset.years) === years;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", String(active));
+    });
   }
 
   function setSourceStatus(text, type = "ready") {
@@ -142,9 +148,8 @@
   }
 
   function renderSelectedFunds() {
-    const total = totalWeight();
-    dom.selectedFunds.innerHTML = state.holdings.map((holding) => `
-      <div class="selected-row" data-code="${escapeHtml(holding.code)}">
+    dom.selectedFunds.innerHTML = state.holdings.map((holding, index) => `
+      <div class="selected-row" style="--fund-color: ${fundNavColors[index % fundNavColors.length]}" data-code="${escapeHtml(holding.code)}">
         <div class="fund-name">
           <strong>${escapeHtml(holding.name)}</strong>
           <code>${escapeHtml(holding.code)}</code>
@@ -157,9 +162,19 @@
         <button class="icon-button remove-holding" type="button" aria-label="移除 ${escapeHtml(holding.name)}" data-remove-code="${escapeHtml(holding.code)}" data-tooltip="移除基金"><i data-lucide="trash-2" aria-hidden="true"></i></button>
       </div>
     `).join("");
+    updateWeightSummary();
+    initializeIcons();
+  }
+
+  function updateWeightSummary() {
+    const total = totalWeight();
     dom.weightTotal.textContent = `${total.toFixed(2)}%`;
     dom.weightTotal.classList.toggle("is-invalid", Math.abs(total - 100) > 0.01);
-    initializeIcons();
+    $("#holdingCount").textContent = `${state.holdings.length} 只基金`;
+    $("#weightBar").innerHTML = state.holdings.map((holding, index) => {
+      const width = Math.max(0, Number(holding.weight) || 0) / Math.max(total, 100) * 100;
+      return `<i style="width: ${width}%; background: ${fundNavColors[index % fundNavColors.length]}"></i>`;
+    }).join("");
   }
 
   function hideSearchResults() {
@@ -294,7 +309,7 @@
       grid: { left: 60, right: 22, top: 15, bottom: 48 },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(3, 37, 89, 0.96)",
+        backgroundColor: "rgba(32, 43, 64, 0.96)",
         borderWidth: 0,
         textStyle: { color: "#fff", fontSize: 12 },
         valueFormatter: (value) => money.format(value),
@@ -303,17 +318,17 @@
         type: "category",
         boundaryGap: false,
         data: series.dates,
-        axisLine: { lineStyle: { color: "#cbd6e0" } },
+        axisLine: { lineStyle: { color: "#dfe7ef" } },
         axisTick: { show: false },
-        axisLabel: { color: "#6f8190", fontSize: 11, hideOverlap: true, margin: 13 },
+        axisLabel: { color: "#6b7d90", fontSize: 11, hideOverlap: true, margin: 13 },
       },
       yAxis: {
         type: "value",
         scale: true,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: "#e5ebf2" } },
-        axisLabel: { color: "#6f8190", fontSize: 11, formatter: (value) => number.format(value) },
+        splitLine: { lineStyle: { color: "#e9eef3" } },
+        axisLabel: { color: "#6b7d90", fontSize: 11, formatter: (value) => number.format(value) },
       },
       dataZoom: [{ type: "inside", start: 0, end: 100 }],
       series: [
@@ -323,8 +338,12 @@
           data: series.nav,
           showSymbol: false,
           smooth: false,
-          lineStyle: { width: 2, color: "#0079c2" },
-          itemStyle: { color: "#0079c2" },
+          lineStyle: { width: 2.5, color: "#32839b" },
+          areaStyle: { color: new window.echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: "rgba(50, 131, 155, 0.09)" },
+            { offset: 1, color: "rgba(50, 131, 155, 0.01)" },
+          ]) },
+          itemStyle: { color: "#32839b" },
         },
         {
           name: "累计投入",
@@ -332,8 +351,8 @@
           data: series.invested,
           showSymbol: false,
           smooth: false,
-          lineStyle: { width: 2, color: "#8c91a2", type: "dashed" },
-          itemStyle: { color: "#8c91a2" },
+          lineStyle: { width: 2, color: "#8c9caf", type: "dashed" },
+          itemStyle: { color: "#8c9caf" },
         },
       ],
     });
@@ -356,11 +375,11 @@
         left: 0,
         right: 0,
         data: labels,
-        textStyle: { color: "#6f8190", fontSize: 12 },
+        textStyle: { color: "#6b7d90", fontSize: 12 },
       },
       tooltip: {
         trigger: "axis",
-        backgroundColor: "rgba(3, 37, 89, 0.96)",
+        backgroundColor: "rgba(32, 43, 64, 0.96)",
         borderWidth: 0,
         textStyle: { color: "#fff", fontSize: 12 },
         valueFormatter: (value) => Number(value).toFixed(4),
@@ -369,17 +388,17 @@
         type: "category",
         boundaryGap: false,
         data: dates,
-        axisLine: { lineStyle: { color: "#cbd6e0" } },
+        axisLine: { lineStyle: { color: "#dfe7ef" } },
         axisTick: { show: false },
-        axisLabel: { color: "#6f8190", fontSize: 11, hideOverlap: true, margin: 13 },
+        axisLabel: { color: "#6b7d90", fontSize: 11, hideOverlap: true, margin: 13 },
       },
       yAxis: {
         type: "value",
         scale: true,
         axisLine: { show: false },
         axisTick: { show: false },
-        splitLine: { lineStyle: { color: "#e5ebf2" } },
-        axisLabel: { color: "#6f8190", fontSize: 11, formatter: (value) => Number(value).toFixed(2) },
+        splitLine: { lineStyle: { color: "#e9eef3" } },
+        axisLabel: { color: "#6b7d90", fontSize: 11, formatter: (value) => Number(value).toFixed(2) },
       },
       dataZoom: [{ type: "inside", start: 0, end: 100 }],
       series: fundNav.items.map((item, index) => ({
@@ -437,7 +456,7 @@
   function renderResults(result) {
     dom.emptyState.hidden = true;
     dom.resultContent.hidden = false;
-    dom.resultTitle.textContent = state.strategy === "rebalance" ? "定期再平衡结果" : "定投计划结果";
+    dom.resultTitle.textContent = result.meta.strategy === "rebalance" ? "定期再平衡结果" : "定投计划结果";
     dom.resultMeta.textContent = `${result.meta.start_date} 至 ${result.meta.end_date}`;
     renderMetrics(result.metrics);
     renderChart(result.series);
@@ -455,6 +474,7 @@
       return;
     }
     dom.runBacktest.disabled = true;
+    dom.results?.setAttribute("aria-busy", "true");
     dom.runBacktest.querySelector("span").textContent = "正在获取行情";
     try {
       const result = await requestJson("/api/backtest", {
@@ -463,16 +483,48 @@
         body: JSON.stringify(data),
       });
       renderResults(result);
+      if (window.innerWidth <= 780) dom.results.scrollIntoView({ behavior: "smooth", block: "start" });
       showToast("回测完成");
     } catch (error) {
       showToast(error.message, true);
     } finally {
       dom.runBacktest.disabled = false;
+      dom.results.setAttribute("aria-busy", "false");
       dom.runBacktest.querySelector("span").textContent = "运行回测";
     }
   }
 
   function bindEvents() {
+    document.querySelectorAll("[data-years]").forEach((button) => {
+      button.addEventListener("click", () => setupDates(Number(button.dataset.years)));
+    });
+    [dom.startDate, dom.endDate].forEach((input) => input.addEventListener("change", () => {
+      document.querySelectorAll("[data-years]").forEach((button) => {
+        button.classList.remove("is-active");
+        button.setAttribute("aria-pressed", "false");
+      });
+    }));
+    document.querySelectorAll(".workspace-link").forEach((link) => {
+      link.addEventListener("click", () => {
+        document.querySelectorAll(".workspace-link").forEach((item) => {
+          item.classList.toggle("is-active", item === link);
+          if (item === link) item.setAttribute("aria-current", "location");
+          else item.removeAttribute("aria-current");
+        });
+      });
+    });
+    dom.fundSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideSearchResults();
+      if (event.key === "ArrowDown") {
+        const first = dom.searchResults.querySelector("button");
+        if (first) { event.preventDefault(); first.focus(); }
+      }
+    });
+    dom.searchResults.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { hideSearchResults(); dom.fundSearch.focus(); }
+      const next = event.key === "ArrowDown" ? event.target.nextElementSibling : event.key === "ArrowUp" ? event.target.previousElementSibling : null;
+      if (next) { event.preventDefault(); next.focus(); }
+    });
     dom.refreshCatalog.addEventListener("click", refreshCatalog);
     dom.fundSearch.addEventListener("input", () => {
       window.clearTimeout(state.searchTimer);
@@ -499,9 +551,7 @@
       if (!input) return;
       const holding = state.holdings.find((item) => item.code === input.dataset.weightCode);
       if (holding) holding.weight = Number(input.value);
-      const total = totalWeight();
-      dom.weightTotal.textContent = `${total.toFixed(2)}%`;
-      dom.weightTotal.classList.toggle("is-invalid", Math.abs(total - 100) > 0.01);
+      updateWeightSummary();
     });
     dom.selectedFunds.addEventListener("click", (event) => {
       const button = event.target.closest("[data-remove-code]");
